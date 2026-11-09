@@ -1,6 +1,6 @@
 # Outil d'administration MegaBac — `outil-admin/`
 
-Application web locale, en un seul fichier HTML, pour créer/modifier/
+Application web locale, sans build ni dépendance (`index.html`, `style.css`, `app.js`), pour créer/modifier/
 supprimer tout le contenu (niveaux, matières, cours, exercices, épreuves)
 sans écrire de JSON à la main. **Aucun serveur applicatif, aucune base de
 données** : elle lit et écrit directement les fichiers du dossier

@@ -6,8 +6,9 @@ Outil d'administration pour gérer le contenu pédagogique de Megabac.
 
 ```
 outil-admin/
-├── index.html          # Interface web
-└── ...                 # Assets et scripts
+├── index.html          # Page HTML
+├── style.css           # Styles
+└── app.js              # Logique (CRUD, aperçus, File System Access API)
 ```
 
 ## Fonctionnalités
