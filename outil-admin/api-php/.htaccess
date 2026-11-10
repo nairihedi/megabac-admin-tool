@@ -1,0 +1,5 @@
+# Apache : l'outil d'admin ne doit jamais exposer la configuration.
+<FilesMatch "^admin-config(\.sample)?\.php$">
+  Require all denied
+</FilesMatch>
+Options -Indexes

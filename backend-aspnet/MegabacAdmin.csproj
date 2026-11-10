@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>MegabacAdmin</RootNamespace>
+  </PropertyGroup>
+
+  <!-- Copie l'interface (../outil-admin) dans wwwroot à chaque build/publish.
+       Le dossier api-php/ (PHP) n'a que des .php/.htaccess/web.config : il n'est pas copié. -->
+  <ItemGroup>
+    <InterfaceAdmin Include="..\outil-admin\**\*.html;..\outil-admin\**\*.css;..\outil-admin\**\*.js" />
+  </ItemGroup>
+  <Target Name="CopierInterface" BeforeTargets="BeforeBuild">
+    <Copy SourceFiles="@(InterfaceAdmin)" DestinationFiles="@(InterfaceAdmin->'$(MSBuildProjectDirectory)\wwwroot\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+  </Target>
+
+</Project>

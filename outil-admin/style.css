@@ -217,3 +217,32 @@ td.actions button { margin-left: 6px; }
 }
 .vide { color: var(--ink-soft); font-size: 0.85rem; padding: 16px 0; }
 .badge-erreur { color: var(--red); font-size: 0.8rem; margin-top: 6px; }
+
+/* Lien de retour à l'accueil (en-tête de admin.html) */
+header .lien-accueil { color: #d7dcee; font-size: 0.82rem; text-decoration: none; }
+header .lien-accueil:hover { color: #fff; }
+
+/* Formulaire de connexion (mode distant) */
+.form-connexion { max-width: 320px; margin: 16px auto 0; text-align: left; }
+
+/* Page de garde (index.html) */
+.garde { max-width: 720px; margin: 60px auto; padding: 0 20px; text-align: center; }
+.garde .intro { color: var(--ink-soft); margin-bottom: 24px; }
+.modes { display: flex; gap: 16px; flex-wrap: wrap; justify-content: center; }
+.mode {
+  flex: 1 1 280px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 24px 20px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  color: var(--ink);
+  text-decoration: none;
+}
+.mode:hover { border-color: var(--indigo); }
+.mode[aria-disabled="true"] { opacity: 0.6; cursor: not-allowed; }
+.mode[aria-disabled="true"]:hover { border-color: var(--line); }
+.mode-icone { font-size: 2rem; }
+.mode span:last-child { color: var(--ink-soft); font-size: 0.85rem; line-height: 1.5; }

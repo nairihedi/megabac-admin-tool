@@ -10,3 +10,10 @@ dist/
 build/
 .env
 .env.local
+
+# Config locale du mot de passe (backends)
+outil-admin/api-php/admin-config.php
+backend-aspnet/**/appsettings.Production.json
+backend-aspnet/**/bin/
+backend-aspnet/**/obj/
+backend-aspnet/**/wwwroot/

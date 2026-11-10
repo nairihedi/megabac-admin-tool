@@ -47,6 +47,78 @@ function genererId(prefixe) {
 return `${prefixe}-${Math.random().toString(36).slice(2, 7)}`;
 }
 
+// Comme echap(), mais laisse passer les <img src="data:image/...;base64,..."> générées
+// par l'outil d'import d'image, pour les afficher dans les aperçus.
+function echapAvecImages(s = '') {
+return echap(s).replace(
+/&lt;img src=&quot;(data:image\/[a-z+.-]+;base64,[A-Za-z0-9+\/=]+)&quot; alt=&quot;&quot;&gt;/g,
+'<img src="$1" alt="">'
+);
+}
+
+// Redimensionne les images raster trop larges pour garder des JSON raisonnables.
+const IMAGE_LARGEUR_MAX = 800;
+function fichierVersDataUri(fichier) {
+return new Promise((resolve, reject) => {
+const lecteur = new FileReader();
+lecteur.onerror = () => reject(new Error('Lecture du fichier impossible.'));
+lecteur.onload = () => {
+const uri = lecteur.result;
+if (fichier.type === 'image/svg+xml' || fichier.type === 'image/gif') return resolve(uri);
+const img = new Image();
+img.onerror = () => reject(new Error("Ce fichier n'est pas une image valide."));
+img.onload = () => {
+if (img.width <= IMAGE_LARGEUR_MAX) return resolve(uri);
+const canvas = document.createElement('canvas');
+canvas.width = IMAGE_LARGEUR_MAX;
+canvas.height = Math.round(img.height * IMAGE_LARGEUR_MAX / img.width);
+canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+resolve(canvas.toDataURL(fichier.type === 'image/png' ? 'image/png' : 'image/jpeg', 0.85));
+};
+img.src = uri;
+};
+lecteur.readAsDataURL(fichier);
+});
+}
+
+// Ajoute un bouton « Insérer une image » sous chaque <textarea data-image> de la racine.
+// L'image est insérée en base64 à la position du curseur, sous forme de balise <img>.
+function activerImportImage(racine) {
+racine.querySelectorAll('textarea[data-image]').forEach((ta) => {
+if (ta.dataset.imageActive) return;
+ta.dataset.imageActive = '1';
+const bouton = document.createElement('button');
+bouton.type = 'button';
+bouton.className = 'discret';
+bouton.textContent = '🖼 Insérer une image';
+const input = document.createElement('input');
+input.type = 'file';
+input.accept = 'image/*';
+input.hidden = true;
+bouton.addEventListener('click', () => input.click());
+input.addEventListener('change', async () => {
+const fichier = input.files[0];
+input.value = '';
+if (!fichier) return;
+try {
+const uri = await fichierVersDataUri(fichier);
+const balise = `<img src="${uri}" alt="">`;
+const debut = ta.selectionStart ?? ta.value.length;
+const fin = ta.selectionEnd ?? ta.value.length;
+ta.value = ta.value.slice(0, debut) + balise + ta.value.slice(fin);
+ta.focus();
+ta.setSelectionRange(debut + balise.length, debut + balise.length);
+ta.dispatchEvent(new Event('input', { bubbles: true }));
+toast(`Image insérée (${Math.round(uri.length / 1024)} Ko).`);
+} catch (e) {
+toast(e.message);
+}
+});
+ta.insertAdjacentElement('afterend', bouton);
+bouton.insertAdjacentElement('afterend', input);
+});
+}
+
 // ============================================================================
 // Utilitaires File System Access API
 // ============================================================================
@@ -88,9 +160,79 @@ return data.version;
 }
 
 // ============================================================================
-// Démarrage — choix du dossier racine
+// Démarrage — mode local (choix du dossier) ou distant (connexion au serveur)
+// Le mode est choisi sur la page d'accueil : admin.html?mode=local
+// ou admin.html?mode=distant&backend=php|aspnet
 // ============================================================================
-document.getElementById('btnChoisirDossier').addEventListener('click', async () => {
+const paramsUrl = new URLSearchParams(location.search);
+const modeAdmin = paramsUrl.get('mode');
+const elBtnDossier = document.getElementById('btnChoisirDossier');
+const elBtnDeconnexion = document.getElementById('btnDeconnexion');
+
+if (modeAdmin === 'local') {
+  document.getElementById('blocLocal').hidden = false;
+  elBtnDossier.hidden = false;
+} else if (modeAdmin === 'distant' && BACKENDS_DISTANTS[paramsUrl.get('backend')]) {
+  demarrerModeDistant(paramsUrl.get('backend'));
+} else {
+  location.replace('../index.html'); // aucun mode valide : retour à l'accueil
+}
+
+function demarrerModeDistant(backend) {
+  const api = new ApiDistante(backend);
+  const nomBackend = backend === 'php' ? 'PHP' : 'ASP.NET Core';
+  document.getElementById('nomBackend').textContent = nomBackend;
+  document.getElementById('blocDistant').hidden = false;
+
+  api.surSessionExpiree = () => {
+    toast('Session expirée : reconnecte-toi.');
+    setTimeout(() => location.reload(), 1200);
+  };
+
+  function ouvrirSession() {
+    state.root = api.racine();
+    elChemin.textContent = `Serveur distant (${nomBackend})`;
+    elAccueil.hidden = true;
+    elLayout.hidden = false;
+    elBtnDeconnexion.hidden = false;
+    rafraichirNiveaux().catch((e) => {
+      toast(e.message);
+      elLayout.hidden = true;
+      elAccueil.hidden = false;
+    });
+  }
+
+  elBtnDeconnexion.addEventListener('click', async () => {
+    try { await api.deconnexion(); } catch { /* session déjà perdue */ }
+    location.reload();
+  });
+
+  const form = document.getElementById('formConnexion');
+  const erreur = document.getElementById('erreurConnexion');
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    erreur.textContent = '';
+    const bouton = document.getElementById('btnConnexion');
+    bouton.disabled = true;
+    try {
+      await api.connexion(
+        document.getElementById('fUtilisateur').value.trim(),
+        document.getElementById('fMotDePasse').value
+      );
+      document.getElementById('fMotDePasse').value = '';
+      ouvrirSession();
+    } catch (err) {
+      erreur.textContent = err.message;
+    } finally {
+      bouton.disabled = false;
+    }
+  });
+
+  // Session déjà ouverte (cookie encore valide) : on entre directement.
+  api.session().then((ouverte) => { if (ouverte) ouvrirSession(); });
+}
+
+elBtnDossier.addEventListener('click', async () => {
 if (!window.showDirectoryPicker) {
   toast("Ton navigateur ne supporte pas cette fonctionnalité — utilise Edge ou Chrome.");
   return;
@@ -421,7 +563,7 @@ elMain.innerHTML = `
         <div class="champ"><label>Résumé (affiché dans la liste)</label><input id="fResume" value="${estEdition ? echap(cours.resume || '') : ''}" /></div>
         <div class="champ">
           <label>Contenu (HTML simple : h2, p, ul/li, strong, em)</label>
-          <textarea id="fContenu" style="min-height:180px">${estEdition ? echap(cours.contenu || '') : ''}</textarea>
+          <textarea data-image id="fContenu" style="min-height:180px">${estEdition ? echap(cours.contenu || '') : ''}</textarea>
         </div>
         <div style="display:flex;gap:8px">
           <button class="primaire" id="btnValider">Enregistrer</button>
@@ -437,6 +579,7 @@ elMain.innerHTML = `
     </div>
   </div>`;
 
+activerImportImage(elMain);
 const inputTitre = document.getElementById('fTitre');
 const inputResume = document.getElementById('fResume');
 const textareaContenu = document.getElementById('fContenu');
@@ -576,9 +719,9 @@ function rendreFormulaire() {
               </select>
             </div>
           </div>
-          <div class="champ"><label>Question</label><textarea id="fQuestion" style="min-height:100px">${estEdition ? echap(exercice.question || '') : ''}</textarea></div>
+          <div class="champ"><label>Question</label><textarea data-image id="fQuestion" style="min-height:100px">${estEdition ? echap(exercice.question || '') : ''}</textarea></div>
           <div id="zoneChoix"></div>
-          <div class="champ"><label>Explication (correction affichée à l'élève)</label><textarea id="fExplication" style="min-height:80px">${estEdition ? echap(exercice.explication || '') : ''}</textarea></div>
+          <div class="champ"><label>Explication (correction affichée à l'élève)</label><textarea data-image id="fExplication" style="min-height:80px">${estEdition ? echap(exercice.explication || '') : ''}</textarea></div>
           <div style="display:flex;gap:8px">
             <button class="primaire" id="btnValider">Enregistrer</button>
             <button id="btnAnnuler">Annuler</button>
@@ -593,6 +736,7 @@ function rendreFormulaire() {
       </div>
     </div>`;
 
+  activerImportImage(elMain);
   const zoneChoix = document.getElementById('zoneChoix');
   const apercuExercice = document.getElementById('apercuExercice');
 
@@ -603,7 +747,7 @@ function rendreFormulaire() {
       apercuExercice.innerHTML = '<div class="apercu-vide">L\'aperçu s\'affichera ici…</div>';
       return;
     }
-    let html = `<h3>Question</h3><p>${echap(question)}</p>`;
+    let html = `<h3>Question</h3><p>${echapAvecImages(question)}</p>`;
     if (type === 'qcm') {
       if (choix.some((c) => c.trim())) {
         html += `<h3>Réponses</h3><ul>`;
@@ -616,7 +760,7 @@ function rendreFormulaire() {
       }
     }
     if (explication) {
-      html += `<h3>Correction</h3><p>${echap(explication)}</p>`;
+      html += `<h3>Correction</h3><p>${echapAvecImages(explication)}</p>`;
     }
     apercuExercice.innerHTML = html;
   }
@@ -801,7 +945,7 @@ function rendreFormulaire() {
     if (duree || bareme) html += `<p><strong>Infos :</strong> ${duree} min • Barème: ${bareme}</p>`;
     questionsValides.forEach((q, i) => {
       html += `<div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--line)">`;
-      html += `<h3>Q${i + 1}. ${echap(q.enonce)}</h3>`;
+      html += `<h3>Q${i + 1}. ${echapAvecImages(q.enonce)}</h3>`;
       if (q.type === 'qcm' && q.choix && q.choix.length > 0) {
         html += `<ul>`;
         q.choix.forEach((c, ci) => {
@@ -813,7 +957,7 @@ function rendreFormulaire() {
         html += `</ul>`;
       }
       if (q.explication && q.explication.trim()) {
-        html += `<p><em>Correction : ${echap(q.explication)}</em></p>`;
+        html += `<p><em>Correction : ${echapAvecImages(q.explication)}</em></p>`;
       }
       html += `</div>`;
     });
@@ -836,16 +980,17 @@ function rendreFormulaire() {
               <option value="texte" ${q.type === 'texte' ? 'selected' : ''}>Question ouverte</option>
             </select>
           </div>
-          <div class="champ"><label>Énoncé</label><textarea class="q-enonce" data-i="${i}">${echap(q.enonce || '')}</textarea></div>
+          <div class="champ"><label>Énoncé</label><textarea data-image class="q-enonce" data-i="${i}">${echap(q.enonce || '')}</textarea></div>
           ${q.type === 'qcm' ? `
             <div class="champ">
               <label>Choix (coche la bonne réponse)</label>
               ${renderChoixEditeur(q.choix || ['', ''], q.reponseCorrecte ?? 0)}
               <button type="button" data-ajouter-choix-question="${i}">+ Ajouter un choix</button>
             </div>` : ''}
-          <div class="champ"><label>Explication</label><textarea class="q-explication" data-i="${i}">${echap(q.explication || '')}</textarea></div>
+          <div class="champ"><label>Explication</label><textarea data-image class="q-explication" data-i="${i}">${echap(q.explication || '')}</textarea></div>
         </div>`).join('');
 
+    activerImportImage(zoneQuestions);
     // Câblage des champs simples
     zoneQuestions.querySelectorAll('.q-type').forEach((sel) => {
       sel.addEventListener('change', () => {

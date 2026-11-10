@@ -3,31 +3,33 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>MegaBac — Administration des données</title>
+<title>MegaBac — Administration</title>
 <link rel="stylesheet" href="style.css" />
 </head>
 <body>
 
 <header>
   <h1>MegaBac — Administration des données</h1>
-  <span class="chemin" id="cheminActuel"></span>
-  <button id="btnChoisirDossier">📁 Choisir le dossier de données</button>
 </header>
 
-<div class="layout" id="layout" hidden>
-  <div class="sidebar" id="sidebar"></div>
-  <div class="main" id="main"></div>
-</div>
+<main class="garde">
+  <p class="intro">Choisis comment accéder aux données.</p>
 
-<div class="accueil" id="accueil">
-  <p>Cet outil édite directement les fichiers JSON du serveur de contenu
-  (structure <code>exemple-donnees-serveur/</code>) sans passer par un
-  backend : choisis le dossier racine pour commencer.</p>
-  <p><small>Fonctionne dans Edge ou Chrome, servi via une URL <code>http://</code>
-  ou <code>https://</code> (pas en ouvrant le fichier directement) — voir le
-  README-ADMIN.md à côté de ce fichier.</small></p>
-</div>
+  <div class="modes">
+    <a class="mode" id="lienLocal" href="admin/admin.html?mode=local">
+      <span class="mode-icone">📁</span>
+      <strong>Mode local</strong>
+      <span>Édite un dossier de ton ordinateur (Edge ou Chrome requis).</span>
+    </a>
 
-<script src="app.js"></script>
+    <a class="mode" id="lienDistant" href="#" aria-disabled="true">
+      <span class="mode-icone">🌐</span>
+      <strong>Mode distant</strong>
+      <span id="infoDistant">Détection du serveur…</span>
+    </a>
+  </div>
+</main>
+
+<script src="accueil.js"></script>
 </body>
 </html>

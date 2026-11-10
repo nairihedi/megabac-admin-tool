@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>MegaBac — Administration des données</title>
+<link rel="stylesheet" href="../style.css" />
+</head>
+<body>
+
+<header>
+  <h1>MegaBac — Administration des données</h1>
+  <span class="chemin" id="cheminActuel"></span>
+  <button id="btnChoisirDossier" hidden>📁 Choisir le dossier de données</button>
+  <button id="btnDeconnexion" hidden>Se déconnecter</button>
+  <a class="lien-accueil" href="../index.html">← Accueil</a>
+</header>
+
+<div class="layout" id="layout" hidden>
+  <div class="sidebar" id="sidebar"></div>
+  <div class="main" id="main"></div>
+</div>
+
+<div class="accueil" id="accueil">
+  <div id="blocLocal" hidden>
+    <p>Mode <strong>local</strong> : cet outil édite directement les fichiers JSON
+    d'un dossier de ton ordinateur (structure <code>exemple-donnees-serveur/</code>)
+    sans passer par un backend : choisis le dossier racine pour commencer.</p>
+    <p><small>Fonctionne dans Edge ou Chrome, servi via une URL <code>http://</code>
+    ou <code>https://</code> (pas en ouvrant le fichier directement) — voir le
+    README-ADMIN.md à côté de ce fichier.</small></p>
+  </div>
+
+  <div id="blocDistant" hidden>
+    <p>Mode <strong>distant</strong> : connecte-toi pour modifier les données
+    hébergées sur le serveur (<span id="nomBackend"></span>).</p>
+    <form id="formConnexion" class="carte form-connexion" autocomplete="on">
+      <div class="champ">
+        <label for="fUtilisateur">Identifiant</label>
+        <input id="fUtilisateur" name="username" autocomplete="username" required />
+      </div>
+      <div class="champ">
+        <label for="fMotDePasse">Mot de passe</label>
+        <input id="fMotDePasse" name="password" type="password" autocomplete="current-password" required />
+      </div>
+      <div id="erreurConnexion" class="badge-erreur"></div>
+      <button class="primaire" id="btnConnexion" type="submit" style="margin-top:10px">Se connecter</button>
+    </form>
+  </div>
+</div>
+
+<script src="remote.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

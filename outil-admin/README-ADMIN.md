@@ -1,13 +1,19 @@
 # Outil d'administration MegaBac — `outil-admin/`
 
-Application web locale, sans build ni dépendance (`index.html`, `style.css`, `app.js`), pour créer/modifier/
+Application web, sans build ni dépendance (page de garde `index.html` ; éditeur dans `admin/` ; backend PHP dans `api-php/`), pour créer/modifier/
 supprimer tout le contenu (niveaux, matières, cours, exercices, épreuves)
-sans écrire de JSON à la main. **Aucun serveur applicatif, aucune base de
-données** : elle lit et écrit directement les fichiers du dossier
-`exemple-donnees-serveur/` (ou n'importe quel dossier de même structure)
-grâce à la **File System Access API** du navigateur.
+sans écrire de JSON à la main. Aucune base de données : elle lit et écrit les fichiers JSON du dossier de
+données (structure `exemple-donnees-serveur/`), de deux façons au choix sur la
+page de garde (`index.html`) :
 
-## Prérequis
+- **Mode local** : directement sur un dossier de ton ordinateur, grâce à la
+  **File System Access API** du navigateur (aucun serveur applicatif).
+- **Mode distant** : sur le serveur qui héberge les données, via une petite
+  API d'administration protégée par un compte unique (voir plus bas). Un seul
+  lien « Mode distant » : la page détecte automatiquement si le serveur
+  répond en PHP ou en ASP.NET Core.
+
+## Prérequis (mode local)
 
 - **Edge ou Chrome** (la File System Access API n'est pas supportée par
   Firefox à ce jour). Les deux sont installés par défaut sous Windows.
@@ -15,7 +21,7 @@ grâce à la **File System Access API** du navigateur.
   le fichier (`file://` n'est pas un contexte sécurisé, la sélection de
   dossier serait refusée par le navigateur).
 
-## Lancer l'outil
+## Lancer l'outil en mode local
 
 Comme pour tester `www/` (voir plus haut dans ce README) : un site IIS
 pointant sur `outil-admin/`, ou plus simple pour un usage ponctuel :
@@ -25,7 +31,7 @@ cd bac-app/outil-admin
 npx serve .
 ```
 
-Puis ouvrir l'URL affichée dans Edge ou Chrome, cliquer sur **"Choisir le
+Puis ouvrir l'URL affichée dans Edge ou Chrome, cliquer sur **Mode local**, puis **"Choisir le
 dossier de données"** et sélectionner `exemple-donnees-serveur/`.
 
 > La sélection de dossier n'est pas mémorisée d'une session à l'autre (pas
@@ -34,6 +40,51 @@ dossier de données"** et sélectionner `exemple-donnees-serveur/`.
 > préfères qu'elle soit mémorisée (possible via l'API IndexedDB, mais avec
 > une popup de re-confirmation de permission à chaque lancement de toute
 > façon, imposée par le navigateur pour des raisons de sécurité).
+
+## Mode distant — déploiement
+
+L'interface est la même ; seul le stockage change (`remote.js` appelle l'API
+`api-php/admin-api.php` ou `/admin-api`). Les données restent servies telles quelles
+(statique) à la PWA : l'API ne sert qu'à l'administration.
+
+Contrat de l'API (identique en PHP et en ASP.NET Core) :
+
+| Requête | Rôle |
+|---|---|
+| `GET ?action=ping` | `{"ok":true,"backend":"php"\|"aspnet"}` (public, sert à la détection) |
+| `GET ?action=session` | `{"authenticated":bool}` (public) |
+| `POST ?action=login` `{user,password}` / `logout` | ouvre / ferme la session |
+| `GET ?action=read&path=6/matieres.json` | contenu du fichier |
+| `GET ?action=list&path=6` | `[{name,kind}]` |
+| `POST ?action=write&path=…` (corps = JSON) | écriture atomique (crée les dossiers parents) |
+| `POST ?action=mkdir&path=…` / `delete&path=…&recursive=1` | dossier / suppression |
+
+Sécurité : compte unique, mot de passe haché, cookie de session `HttpOnly` +
+`SameSite=Strict`, en-tête `X-Requested-With` + contrôle d'`Origin` sur les POST,
+blocage après 5 échecs en 15 min par IP, chemins limités à des segments simples
+(`[A-Za-z0-9._-]`, jamais `..`), fichiers `.json` uniquement, 16 Mo max.
+**Mets l'outil derrière HTTPS** (sinon mot de passe et cookie circulent en clair)
+et, si possible, restreins l'accès au dossier par IP.
+
+### PHP (Apache, ou IIS + PHP ≥ 7.4)
+1. Copie le dossier `outil-admin/` sur le serveur (il contient déjà `api-php/`).
+2. Dans `api-php/`, copie `admin-config.sample.php` en `admin-config.php` et renseigne :
+   `data_dir` (chemin absolu du dossier de données, **inscriptible** par PHP),
+   `username` et `password_hash`
+   (`php -r "echo password_hash('MOT_DE_PASSE', PASSWORD_DEFAULT);"`).
+3. `.htaccess` (Apache) / `web.config` (IIS) bloquent déjà l'accès direct à la config.
+4. Si besoin, augmenter `post_max_size` / `upload_max_filesize` (images en base64).
+
+### ASP.NET Core (IIS, runtime .NET 8 Hosting Bundle)
+1. `cd backend-aspnet && dotnet publish -c Release -o publish` : l'interface
+   `outil-admin/` est copiée automatiquement dans `wwwroot`.
+2. Dans `publish/appsettings.json` (ou variables d'environnement `Admin__…`) :
+   `DataPath` (dossier de données, **inscriptible** par le compte du pool IIS),
+   `Username`, `PasswordHash` (`dotnet run -- --hash "MOT_DE_PASSE"`).
+3. Crée un site IIS pointant sur `publish/`. Test local : `dotnet run`.
+
+Limite : à plusieurs administrateurs simultanés, le dernier enregistrement
+écrase le précédent (comme en local).
 
 ## Ce que l'outil fait pour toi automatiquement
 
