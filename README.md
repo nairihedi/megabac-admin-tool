@@ -10,7 +10,7 @@ directement les fichiers JSON du dossier de données servi à l'application.
 | Projet | Rôle | Emplacement |
 |---|---|---|
 | **MegabacPwa** | Application (PWA) qui affiche le contenu | `C:\PERSO\Android\Megabac\PWA` |
-| **megabac-data-server** | Données JSON servies en statique (exemple : `exemple-données-serveur/`) | `C:\PERSO\Android\Megabac_serveurs\megabac-data-server` |
+| **megabac-data-server** | Données JSON servies en statique (exemple : `exemple-données-serveur/`) | `C:\PERSO\Android\Megabac\data-server` |
 | **megabac-admin-tool** (ce dépôt) | Édition de ces données | ici |
 
 Flux : l'admin écrit les JSON dans le dossier de données → le serveur de
