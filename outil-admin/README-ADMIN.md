@@ -60,7 +60,7 @@ Contrat de l'API (identique en PHP et en ASP.NET Core) :
 | `POST ?action=mkdir&path=…` / `delete&path=…&recursive=1` | dossier / suppression |
 
 Sécurité : compte unique, mot de passe haché, cookie de session `HttpOnly` +
-`SameSite=Strict`, en-tête `X-Requested-With` + contrôle d'`Origin` sur les POST,
+`SameSite=Strict` (nom propre à l'installation, donc sans collision entre deux instances sur le même hôte), en-tête `X-Requested-With` + contrôle d'`Origin` sur les POST,
 blocage après 5 échecs en 15 min par IP, chemins limités à des segments simples
 (`[A-Za-z0-9._-]`, jamais `..`), fichiers `.json` uniquement, 16 Mo max.
 **Mets l'outil derrière HTTPS** (sinon mot de passe et cookie circulent en clair)
@@ -85,6 +85,23 @@ et, si possible, restreins l'accès au dossier par IP.
 
 Limite : à plusieurs administrateurs simultanés, le dernier enregistrement
 écrase le précédent (comme en local).
+
+## Cache du navigateur : les modifications n'apparaissent pas dans l'application
+
+L'application ne relit un contenu que si son `version.json` a changé. Si le
+serveur qui héberge les données n'envoie aucune consigne de cache, le navigateur
+garde `version.json` de lui-même et ne voit jamais la nouvelle version (même après
+Ctrl+F5, qui ne concerne pas les requêtes lancées ensuite par le JavaScript).
+
+**À faire une fois sur le serveur des données** : y placer la configuration du
+dossier `serveur-donnees/` (à la racine des données, à côté de `6/`, `5/`…) :
+`web.config` pour IIS, `.htaccess` pour Apache. Elle impose `Cache-Control: no-cache`
+(le navigateur revalide à chaque fois : réponse 304 légère si rien n'a changé) et
+reprend la configuration CORS. Si un `web.config` existe déjà, fusionner les sections.
+
+L'interface d'administration elle-même est déjà servie avec `no-cache`
+(ASP.NET Core : automatique ; PHP : `.htaccess` / `web.config` à la racine de `outil-admin/`),
+et l'API répond avec `Cache-Control: no-store`.
 
 ## Ce que l'outil fait pour toi automatiquement
 

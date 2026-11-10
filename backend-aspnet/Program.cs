@@ -37,12 +37,17 @@ if (args.Length == 2 && args[0] == "--hash")
 }
 
 var builder = WebApplication.CreateBuilder(args);
+// Nom de cookie propre à l'installation (dossier de l'application + dossier de données) :
+// deux installations sur le même hôte (autre port, autre sous-site) ne se marchent plus dessus,
+// les cookies n'étant pas isolés par port.
+string nomCookie = "megabac_admin_" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(
+    builder.Environment.ContentRootPath + "|" + (builder.Configuration["Admin:DataPath"] ?? ""))))[..8].ToLowerInvariant();
 builder.WebHost.ConfigureKestrel(o => o.Limits.MaxRequestBodySize = 20 * 1024 * 1024);
 builder.Services
     .AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
     .AddCookie(o =>
     {
-        o.Cookie.Name = "megabac_admin";
+        o.Cookie.Name = nomCookie;
         o.Cookie.HttpOnly = true;
         o.Cookie.SameSite = SameSiteMode.Strict;
         o.Cookie.SecurePolicy = CookieSecurePolicy.SameAsRequest;
@@ -62,7 +67,12 @@ string utilisateur = cfg["Username"] ?? "";
 string hashMdp = cfg["PasswordHash"] ?? "";
 
 app.UseDefaultFiles();
-app.UseStaticFiles();
+// Interface : toujours revalider (ETag → 304 si inchangé). Évite qu'une ancienne version
+// de app.js / style.css reste en cache après un redéploiement.
+app.UseStaticFiles(new StaticFileOptions
+{
+    OnPrepareResponse = c => c.Context.Response.Headers["Cache-Control"] = "no-cache",
+});
 app.UseAuthentication();
 
 var essais = new ConcurrentDictionary<string, List<DateTime>>();

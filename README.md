@@ -20,6 +20,7 @@ outil-admin/                 # à déployer tel quel (hébergement PHP ou statiq
     ├── .htaccess
     └── web.config
 backend-aspnet/              # Backend ASP.NET Core (sert aussi l'interface)
+serveur-donnees/             # Modèles web.config / .htaccess pour le serveur des DONNÉES (cache, CORS)
 ```
 
 ## Fonctionnalités

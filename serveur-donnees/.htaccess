@@ -1,0 +1,16 @@
+# Modèle Apache pour le DOSSIER DES DONNÉES (celui lu par l'application MegaBac).
+# Nécessite mod_headers (a2enmod headers) et AllowOverride FileInfo/All.
+#
+# Cache-Control: no-cache : le navigateur REVALIDE à chaque requête (304 si inchangé, donc très léger).
+# Sans cela, le navigateur peut garder version.json en cache « heuristique » et l'application
+# ne voit pas qu'un cours a été modifié.
+Options -Indexes
+AddType application/json .json
+<IfModule mod_headers.c>
+  <FilesMatch "\.json$">
+    Header set Cache-Control "no-cache"
+  </FilesMatch>
+  # CORS : nécessaire si l'application et les données sont sur des origines différentes.
+  Header set Access-Control-Allow-Origin "*"
+  Header set Access-Control-Allow-Methods "GET, OPTIONS, HEAD"
+</IfModule>

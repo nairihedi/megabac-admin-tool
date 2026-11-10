@@ -60,7 +60,9 @@ foreach (['data_dir', 'username', 'password_hash'] as $cle) {
 // ---------------------------------------------------------------------------
 $https = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
     || ($_SERVER['SERVER_PORT'] ?? '') == 443;
-session_name('megabac_admin');
+// Nom de cookie propre à l'installation : deux installations sur le même hôte (autre port,
+// autre sous-dossier) ne se marchent plus dessus, les cookies n'étant pas isolés par port.
+session_name('megabac_admin_' . substr(hash('sha256', __DIR__ . '|' . $config['data_dir']), 0, 8));
 session_set_cookie_params([
     'lifetime' => 0,
     'path' => '/',
