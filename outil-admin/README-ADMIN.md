@@ -3,7 +3,7 @@
 Application web, sans build ni dépendance (page de garde `index.html` ; éditeur dans `admin/` ; backend PHP dans `api-php/`), pour créer/modifier/
 supprimer tout le contenu (niveaux, matières, cours, exercices, épreuves)
 sans écrire de JSON à la main. Aucune base de données : elle lit et écrit les fichiers JSON du dossier de
-données (structure `exemple-donnees-serveur/`), de deux façons au choix sur la
+données (structure `exemple-données-serveur/` du projet `megabac-data-server`), de deux façons au choix sur la
 page de garde (`index.html`) :
 
 - **Mode local** : directement sur un dossier de ton ordinateur, grâce à la
@@ -23,16 +23,17 @@ page de garde (`index.html`) :
 
 ## Lancer l'outil en mode local
 
-Comme pour tester `www/` (voir plus haut dans ce README) : un site IIS
-pointant sur `outil-admin/`, ou plus simple pour un usage ponctuel :
+Un site IIS pointant sur `outil-admin/`, ou plus simple pour un usage ponctuel
+(depuis la racine du dépôt `megabac-admin-tool`) :
 
 ```bash
-cd bac-app/outil-admin
+cd outil-admin
 npx serve .
 ```
 
 Puis ouvrir l'URL affichée dans Edge ou Chrome, cliquer sur **Mode local**, puis **"Choisir le
-dossier de données"** et sélectionner `exemple-donnees-serveur/`.
+dossier de données"** et sélectionner votre dossier de données (par exemple
+`exemple-données-serveur/`).
 
 > La sélection de dossier n'est pas mémorisée d'une session à l'autre (pas
 > de gestion utilisateur, comme demandé) : il faut la refaire à chaque
