@@ -196,9 +196,12 @@ function demarrerModeDistant(backend) {
     elLayout.hidden = false;
     elBtnDeconnexion.hidden = false;
     rafraichirNiveaux().catch((e) => {
-      toast(e.message);
+      console.error('[MegabacAdmin] Chargement des niveaux impossible :', e);
       elLayout.hidden = true;
       elAccueil.hidden = false;
+      elBtnDeconnexion.hidden = true;
+      document.getElementById('erreurConnexion').textContent =
+        `Connecté, mais impossible de charger les données : ${e.message}`;
     });
   }
 

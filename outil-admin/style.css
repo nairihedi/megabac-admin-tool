@@ -12,6 +12,8 @@
   --radius: 8px;
 }
 * { box-sizing: border-box; }
+/* L'attribut hidden doit toujours l'emporter (sinon .layout { display: flex } reste affiché). */
+[hidden] { display: none !important; }
 body {
   margin: 0;
   font-family: -apple-system, "Segoe UI", Roboto, sans-serif;

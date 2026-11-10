@@ -33,15 +33,27 @@ class ApiDistante {
     const qs = new URLSearchParams({ action, ...params });
     const headers = { 'X-Requested-With': 'megabac-admin' };
     if (body !== undefined) headers['Content-Type'] = 'application/json';
-    const res = await fetch(`${this.url}?${qs}`, {
-      method, headers, body, credentials: 'same-origin', cache: 'no-store',
-    });
+    const cible = `${method} ${this.url}?${qs}`;
+    let res;
+    try {
+      res = await fetch(`${this.url}?${qs}`, {
+        method, headers, body, credentials: 'same-origin', cache: 'no-store',
+      });
+    } catch (e) {
+      console.error(`[MegabacAdmin] ${cible} → serveur injoignable`, e);
+      throw new ErreurApi('Serveur injoignable.', 0);
+    }
     if (!res.ok) {
       const data = await res.json().catch(() => ({}));
+      const message = data.error || `Erreur serveur (${res.status})`;
+      // 404 sur « session » ou lecture d'un fichier absent : cas normaux, pas de bruit.
+      if (!(res.status === 404 && (action === 'read' || action === 'list'))) {
+        console.warn(`[MegabacAdmin] ${cible} → ${res.status} : ${message}`);
+      }
       if (res.status === 401 && action !== 'login' && action !== 'session') {
         this.surSessionExpiree?.();
       }
-      throw new ErreurApi(data.error || `Erreur serveur (${res.status})`, res.status);
+      throw new ErreurApi(message, res.status);
     }
     return res;
   }
