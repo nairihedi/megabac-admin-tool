@@ -14,7 +14,7 @@
   .\deployer-aspnet.ps1 -Destination D:\autre\dossier
 #>
 param(
-    [string]$Destination = 'C:\PERSO\Android\Megabac_Tests\MegabacAdmin',
+    [string]$Destination = (Join-Path (Split-Path $PSScriptRoot -Parent) 'Tests\MegabacAdmin'),
     [string]$Configuration = 'Release'
 )
 
@@ -41,9 +41,19 @@ try {
     $configExiste = Test-Path $configDest
 
     Write-Host "Copie vers $Destination ..." -ForegroundColor Cyan
-    Get-ChildItem $temp -Force | ForEach-Object {
-        if ($configExiste -and $_.Name -eq 'appsettings.json') { return } # config conservée
-        Copy-Item $_.FullName -Destination $Destination -Recurse -Force
+    # IIS (hébergement in-process) verrouille MegabacAdmin.dll : app_offline.htm arrête
+    # l'application le temps de la copie (elle redémarre dès que le fichier est supprimé).
+    $offline = Join-Path $Destination 'app_offline.htm'
+    Set-Content -Path $offline -Value '<html><body>Mise à jour en cours…</body></html>' -Encoding UTF8
+    try {
+        Start-Sleep -Seconds 2
+        Get-ChildItem $temp -Force | ForEach-Object {
+            if ($configExiste -and $_.Name -eq 'appsettings.json') { return } # config conservée
+            Copy-Item $_.FullName -Destination $Destination -Recurse -Force
+        }
+    }
+    finally {
+        Remove-Item $offline -Force -ErrorAction SilentlyContinue
     }
 
     Write-Host ""

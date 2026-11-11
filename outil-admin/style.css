@@ -96,6 +96,18 @@ th { color: var(--ink-soft); font-weight: 600; font-size: 0.75rem; text-transfor
 td.actions { white-space: nowrap; text-align: right; }
 td.actions button { margin-left: 6px; }
 
+/* Réordonnancement : poignée, boutons ▲▼, indicateurs de dépôt */
+td.poignee { width: 24px; padding-right: 0; color: var(--ink-soft); cursor: grab; user-select: none; text-align: center; }
+[data-ordre-id][draggable="true"] { cursor: grab; }
+[data-ordre-id].glisse { opacity: 0.4; }
+tr.depot-avant > td { box-shadow: inset 0 2px 0 var(--indigo); }
+tr.depot-apres > td { box-shadow: inset 0 -2px 0 var(--indigo); }
+.item-liste.depot-avant { box-shadow: inset 0 2px 0 var(--gold); }
+.item-liste.depot-apres { box-shadow: inset 0 -2px 0 var(--gold); }
+button.ordre { padding: 4px 6px; font-size: 0.75rem; line-height: 1; }
+button.ordre:disabled { opacity: 0.25; }
+td.actions button.ordre { margin-left: 0; }
+
 .onglets { display: flex; gap: 4px; margin-bottom: 14px; border-bottom: 1px solid var(--line); }
 .onglet {
   padding: 8px 14px;
@@ -248,3 +260,9 @@ header .lien-accueil:hover { color: #fff; }
 .mode[aria-disabled="true"]:hover { border-color: var(--line); }
 .mode-icone { font-size: 2rem; }
 .mode span:last-child { color: var(--ink-soft); font-size: 0.85rem; line-height: 1.5; }
+
+/* Pagination de l'aperçu des cours : barre collée en bas de la colonne d'aperçu */
+.apercu-pager { position: sticky; bottom: 0; margin-top: auto; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 14px; background: var(--panel); border-top: 1px solid var(--line); }
+.apercu-pager[hidden] { display: none; }
+.apercu-pager button { width: auto; padding: 4px 10px; font-size: 0.8rem; }
+.apercu-pager-info { color: var(--ink-soft); font-size: 0.8rem; }

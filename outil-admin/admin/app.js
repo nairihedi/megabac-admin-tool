@@ -119,6 +119,31 @@ bouton.insertAdjacentElement('afterend', input);
 });
 }
 
+// Ajoute un bouton « Saut de page » sous un <textarea data-saut> : insère <break />
+// à la position du curseur (les cours sont paginés par la PWA sur cette balise).
+const REGEX_SAUT = /<\s*\/?\s*(?:break|newpage)\b[^>]*>/gi;
+function activerSautDePage(racine) {
+racine.querySelectorAll('textarea[data-saut]').forEach((ta) => {
+if (ta.dataset.sautActif) return;
+ta.dataset.sautActif = '1';
+const bouton = document.createElement('button');
+bouton.type = 'button';
+bouton.className = 'discret';
+bouton.textContent = '✂ Saut de page';
+bouton.title = "Insère <break /> : l'élève verra la suite sur une nouvelle page";
+bouton.addEventListener('click', () => {
+const balise = '\n<break />\n';
+const debut = ta.selectionStart ?? ta.value.length;
+const fin = ta.selectionEnd ?? ta.value.length;
+ta.value = ta.value.slice(0, debut) + balise + ta.value.slice(fin);
+ta.focus();
+ta.setSelectionRange(debut + balise.length, debut + balise.length);
+ta.dispatchEvent(new Event('input', { bubbles: true }));
+});
+ta.insertAdjacentElement('afterend', bouton);
+});
+}
+
 // ============================================================================
 // Utilitaires File System Access API
 // ============================================================================
@@ -157,6 +182,89 @@ const data = await readJson(dir, 'version.json', { version: 0 });
 data.version = (data.version || 0) + 1;
 await writeJson(dir, 'version.json', data);
 return data.version;
+}
+
+// ============================================================================
+// Réordonnancement (matières, cours, exercices, épreuves)
+//
+// L'ordre d'affichage dans l'application est celui du tableau dans le fichier
+// de liste : réordonner = réécrire ce tableau, puis incrémenter la version
+// concernée pour que l'application retélécharge la liste.
+// Deux gestes : boutons ▲ ▼ (précis, tactile) ou glisser-déposer.
+// Les éléments réordonnables portent data-ordre-id="<id>" et draggable="true".
+// ============================================================================
+function boutonsOrdre(i, n) {
+return `<button class="discret ordre" data-monter title="Monter" ${i === 0 ? 'disabled' : ''} style="color:inherit">▲</button>` +
+       `<button class="discret ordre" data-descendre title="Descendre" ${i === n - 1 ? 'disabled' : ''} style="color:inherit">▼</button>`;
+}
+
+// Écrit la liste (cours / exercices / epreuves) d'une matière et incrémente la version de la matière.
+async function enregistrerOrdreMatiere(nomDossier, matiere, liste) {
+const dir = await getOrCreateDir(state.niveauDir, nomDossier);
+await writeJson(dir, `${matiere.id}.json`, liste);
+const matDir = await getOrCreateDir(state.niveauDir, 'matieres');
+await bumpVersion(await getOrCreateDir(matDir, matiere.id));
+}
+
+// racine : élément contenant les lignes ; liste : tableau (modifié sur place) ;
+// enregistrer : écrit sur disque/serveur ; rerendre : réaffiche après enregistrement.
+function activerReordonnancement(racine, liste, enregistrer, rerendre) {
+const indexDe = (el) => liste.findIndex((x) => String(x.id) === el.dataset.ordreId);
+let glisse = null; // id de la ligne en cours de déplacement
+
+async function deplacer(de, vers) {
+  if (de < 0 || vers < 0 || vers >= liste.length || de === vers) return;
+  const [element] = liste.splice(de, 1);
+  liste.splice(vers, 0, element);
+  try {
+    await enregistrer();
+    toast('Ordre enregistré.');
+  } catch (err) {
+    toast('Échec de l’enregistrement de l’ordre : ' + (err && err.message ? err.message : err));
+  }
+  await rerendre();
+}
+
+const nettoyer = () => racine.querySelectorAll('.depot-avant, .depot-apres, .glisse')
+  .forEach((e) => e.classList.remove('depot-avant', 'depot-apres', 'glisse'));
+
+racine.querySelectorAll('[data-ordre-id]').forEach((el) => {
+  const i = indexDe(el);
+
+  const haut = el.querySelector('[data-monter]');
+  const bas = el.querySelector('[data-descendre]');
+  if (haut) haut.addEventListener('click', (e) => { e.stopPropagation(); deplacer(i, i - 1); });
+  if (bas) bas.addEventListener('click', (e) => { e.stopPropagation(); deplacer(i, i + 1); });
+
+  el.addEventListener('dragstart', (e) => {
+    glisse = el.dataset.ordreId;
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', glisse); // requis par Firefox
+    el.classList.add('glisse');
+  });
+  el.addEventListener('dragend', () => { glisse = null; nettoyer(); });
+  el.addEventListener('dragover', (e) => {
+    if (glisse === null) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    const r = el.getBoundingClientRect();
+    const apres = e.clientY > r.top + r.height / 2;
+    el.classList.toggle('depot-apres', apres);
+    el.classList.toggle('depot-avant', !apres);
+  });
+  el.addEventListener('dragleave', () => el.classList.remove('depot-avant', 'depot-apres'));
+  el.addEventListener('drop', (e) => {
+    if (glisse === null) return;
+    e.preventDefault();
+    const apres = el.classList.contains('depot-apres');
+    const de = liste.findIndex((x) => String(x.id) === glisse);
+    let vers = indexDe(el) + (apres ? 1 : 0);
+    if (de < vers) vers--;
+    glisse = null;
+    nettoyer();
+    deplacer(de, vers);
+  });
+});
 }
 
 // ============================================================================
@@ -291,9 +399,10 @@ elSidebar.innerHTML = `
     <div class="bloc">
       <h2>Matières — ${echap(libelleNiveau(state.niveauCourant))}</h2>
       ${state.matieres.length === 0 ? '<p class="vide">Aucune matière.</p>' : ''}
-      ${state.matieres.map((m) => `
-        <div class="item-liste ${m.id === state.matiereCourante ? 'actif' : ''}" data-matiere="${m.id}">
+      ${state.matieres.map((m, i) => `
+        <div class="item-liste ${m.id === state.matiereCourante ? 'actif' : ''}" data-matiere="${m.id}" data-ordre-id="${echap(m.id)}" draggable="true" title="Glisser pour réordonner">
           <span>${m.icone || '📘'} ${echap(m.nom)}</span>
+          ${m.id === state.matiereCourante ? `<span>${boutonsOrdre(i, state.matieres.length)}</span>` : ''}
         </div>`).join('')}
       <button id="btnAjouterMatiere" style="margin-top:8px;width:100%">+ Ajouter une matière</button>
     </div>` : ''}
@@ -316,6 +425,16 @@ elSidebar.querySelectorAll('[data-matiere]').forEach((el) => {
 });
 const btnAjouterMatiere = document.getElementById('btnAjouterMatiere');
 if (btnAjouterMatiere) btnAjouterMatiere.addEventListener('click', () => ouvrirFormMatiere(null));
+
+activerReordonnancement(
+  elSidebar,
+  state.matieres,
+  async () => {
+    await writeJson(state.niveauDir, 'matieres.json', state.matieres);
+    state.niveauVersion = await bumpVersion(state.niveauDir);
+  },
+  async () => { renderSidebar(); }
+);
 }
 
 async function ajouterNiveau() {
@@ -528,12 +647,14 @@ conteneur.innerHTML = `
   <div class="carte">
     <h3>Cours <button class="primaire" id="btnAjouterCours" style="float:right">+ Ajouter un cours</button></h3>
     ${liste.length === 0 ? '<p class="vide">Aucun cours.</p>' : `
-      <table><thead><tr><th>Titre</th><th>Résumé</th><th></th></tr></thead><tbody>
-        ${liste.map((c) => `
-          <tr>
+      <table><thead><tr><th></th><th>Titre</th><th>Résumé</th><th></th></tr></thead><tbody>
+        ${liste.map((c, i) => `
+          <tr data-ordre-id="${echap(c.id)}" draggable="true">
+            <td class="poignee" title="Glisser pour réordonner">⠿</td>
             <td>${echap(c.titre)}</td>
             <td>${echap(c.resume || '')}</td>
             <td class="actions">
+              ${boutonsOrdre(i, liste.length)}
               <button data-editer="${c.id}">Modifier</button>
               <button class="danger" data-supprimer="${c.id}">Supprimer</button>
             </td>
@@ -553,6 +674,7 @@ conteneur.querySelectorAll('[data-editer]').forEach((btn) => {
 conteneur.querySelectorAll('[data-supprimer]').forEach((btn) => {
   btn.addEventListener('click', () => supprimerCours(matiere, btn.dataset.supprimer, liste));
 });
+activerReordonnancement(conteneur, liste, () => enregistrerOrdreMatiere('cours', matiere, liste), renderMatiereDetail);
 }
 
 function ouvrirFormCours(matiere, cours, liste) {
@@ -565,8 +687,8 @@ elMain.innerHTML = `
         <div class="champ"><label>Titre</label><input id="fTitre" value="${estEdition ? echap(cours.titre) : ''}" /></div>
         <div class="champ"><label>Résumé (affiché dans la liste)</label><input id="fResume" value="${estEdition ? echap(cours.resume || '') : ''}" /></div>
         <div class="champ">
-          <label>Contenu (HTML simple : h2, p, ul/li, strong, em)</label>
-          <textarea data-image id="fContenu" style="min-height:180px">${estEdition ? echap(cours.contenu || '') : ''}</textarea>
+          <label>Contenu (HTML simple : h2, p, ul/li, strong, em ; &lt;break /&gt; = saut de page)</label>
+          <textarea data-image data-saut id="fContenu" style="min-height:180px">${estEdition ? echap(cours.contenu || '') : ''}</textarea>
         </div>
         <div style="display:flex;gap:8px">
           <button class="primaire" id="btnValider">Enregistrer</button>
@@ -583,21 +705,50 @@ elMain.innerHTML = `
   </div>`;
 
 activerImportImage(elMain);
+activerSautDePage(elMain);
 const inputTitre = document.getElementById('fTitre');
 const inputResume = document.getElementById('fResume');
 const textareaContenu = document.getElementById('fContenu');
 const apercuCours = document.getElementById('apercuCours');
+
+// Aperçu paginé comme dans la PWA : une page par segment délimité par <break /> / <newpage />,
+// avec une barre de navigation collée en bas de la colonne d'aperçu.
+let pageApercu = 0;
+const pagerApercu = document.createElement('nav');
+pagerApercu.className = 'apercu-pager';
+pagerApercu.hidden = true;
+pagerApercu.innerHTML = `
+  <button type="button" data-dir="-1">‹ Précédent</button>
+  <span class="apercu-pager-info"></span>
+  <button type="button" data-dir="1">Suivant ›</button>`;
+apercuCours.closest('.apercu-contenu').insertAdjacentElement('afterend', pagerApercu);
+pagerApercu.addEventListener('click', (e) => {
+  const b = e.target.closest('button[data-dir]');
+  if (!b) return;
+  pageApercu += Number(b.dataset.dir);
+  mettreAJourApercu();
+  apercuCours.closest('.apercu-col').scrollTo({ top: 0 });
+});
 
 function mettreAJourApercu() {
   const titre = inputTitre.value.trim();
   const contenu = textareaContenu.value.trim();
   if (!titre && !contenu) {
     apercuCours.innerHTML = '<div class="apercu-vide">L\'aperçu s\'affichera ici…</div>';
+    pagerApercu.hidden = true;
     return;
   }
+  const pages = contenu.split(REGEX_SAUT).filter((p) => p.trim());
+  if (!pages.length) pages.push('');
+  pageApercu = Math.min(Math.max(pageApercu, 0), pages.length - 1);
   apercuCours.innerHTML = `
-    ${titre ? `<h2>${echap(titre)}</h2>` : ''}
-    ${contenu ? contenu : ''}`;
+    ${titre && pageApercu === 0 ? `<h2>${echap(titre)}</h2>` : ''}
+    ${pages[pageApercu]}`;
+  pagerApercu.hidden = pages.length < 2;
+  pagerApercu.querySelector('.apercu-pager-info').textContent = `${pageApercu + 1} / ${pages.length}`;
+  const [prec, suiv] = pagerApercu.querySelectorAll('button');
+  prec.disabled = pageApercu === 0;
+  suiv.disabled = pageApercu === pages.length - 1;
 }
 
 inputTitre.addEventListener('input', mettreAJourApercu);
@@ -658,12 +809,14 @@ conteneur.innerHTML = `
   <div class="carte">
     <h3>Exercices <button class="primaire" id="btnAjouter" style="float:right">+ Ajouter un exercice</button></h3>
     ${liste.length === 0 ? '<p class="vide">Aucun exercice.</p>' : `
-      <table><thead><tr><th>Titre</th><th>Difficulté</th><th></th></tr></thead><tbody>
-        ${liste.map((e) => `
-          <tr>
+      <table><thead><tr><th></th><th>Titre</th><th>Difficulté</th><th></th></tr></thead><tbody>
+        ${liste.map((e, i) => `
+          <tr data-ordre-id="${echap(e.id)}" draggable="true">
+            <td class="poignee" title="Glisser pour réordonner">⠿</td>
             <td>${echap(e.titre)}</td>
             <td>${echap(e.difficulte || '')}</td>
             <td class="actions">
+              ${boutonsOrdre(i, liste.length)}
               <button data-editer="${e.id}">Modifier</button>
               <button class="danger" data-supprimer="${e.id}">Supprimer</button>
             </td>
@@ -683,6 +836,7 @@ conteneur.querySelectorAll('[data-editer]').forEach((btn) => {
 conteneur.querySelectorAll('[data-supprimer]').forEach((btn) => {
   btn.addEventListener('click', () => supprimerExercice(matiere, btn.dataset.supprimer, liste));
 });
+activerReordonnancement(conteneur, liste, () => enregistrerOrdreMatiere('exercices', matiere, liste), renderMatiereDetail);
 }
 
 function renderChoixEditeur(choix, reponseCorrecte) {
@@ -868,13 +1022,15 @@ conteneur.innerHTML = `
   <div class="carte">
     <h3>Épreuves <button class="primaire" id="btnAjouter" style="float:right">+ Ajouter une épreuve</button></h3>
     ${liste.length === 0 ? '<p class="vide">Aucune épreuve.</p>' : `
-      <table><thead><tr><th>Titre</th><th>Durée</th><th>Questions</th><th></th></tr></thead><tbody>
-        ${liste.map((ep) => `
-          <tr>
+      <table><thead><tr><th></th><th>Titre</th><th>Durée</th><th>Questions</th><th></th></tr></thead><tbody>
+        ${liste.map((ep, i) => `
+          <tr data-ordre-id="${echap(ep.id)}" draggable="true">
+            <td class="poignee" title="Glisser pour réordonner">⠿</td>
             <td>${echap(ep.titre)}</td>
             <td>${ep.dureeMinutes} min</td>
             <td>${ep.nbQuestions}</td>
             <td class="actions">
+              ${boutonsOrdre(i, liste.length)}
               <button data-editer="${ep.id}">Modifier</button>
               <button class="danger" data-supprimer="${ep.id}">Supprimer</button>
             </td>
@@ -894,6 +1050,7 @@ conteneur.querySelectorAll('[data-editer]').forEach((btn) => {
 conteneur.querySelectorAll('[data-supprimer]').forEach((btn) => {
   btn.addEventListener('click', () => supprimerEpreuve(matiere, btn.dataset.supprimer, liste));
 });
+activerReordonnancement(conteneur, liste, () => enregistrerOrdreMatiere('epreuves', matiere, liste), renderMatiereDetail);
 }
 
 function ouvrirFormEpreuve(matiere, epreuve, liste) {
