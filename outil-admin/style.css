@@ -266,3 +266,184 @@ header .lien-accueil:hover { color: #fff; }
 .apercu-pager[hidden] { display: none; }
 .apercu-pager button { width: auto; padding: 4px 10px; font-size: 0.8rem; }
 .apercu-pager-info { color: var(--ink-soft); font-size: 0.8rem; }
+
+/* ============================================================================
+   Formulaire de contenu (cours) : barre d'actions collante + éditeur visuel
+   ============================================================================ */
+.form-contenu { max-width: 900px; margin: 0 auto; }
+.barre-form {
+  position: sticky; top: -20px; z-index: 20;
+  display: flex; align-items: center; gap: 10px;
+  margin: -20px -8px 14px; padding: 12px 8px;
+  background: var(--bg);
+}
+.barre-form h3 { margin: 0; font-size: 1.05rem; flex: 1; }
+.etat-form { font-size: 0.78rem; color: var(--gold); font-weight: 600; }
+
+/* --- Éditeur visuel (editeur.js) --- */
+.ed {
+  --ed-accent: #5a3be0;
+  --ed-accent-doux: #efebfe;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  margin-bottom: 24px;
+}
+.ed-barre {
+  position: sticky; top: 36px; z-index: 15;
+  display: flex; flex-wrap: wrap; align-items: center; gap: 3px;
+  padding: 8px 10px;
+  background: #fafbfc;
+  border-bottom: 1px solid var(--line);
+  border-radius: var(--radius) var(--radius) 0 0;
+}
+.ed-btn { padding: 6px 8px; min-width: 30px; background: #fff; white-space: nowrap; }
+.ed-btn.actif { background: var(--ed-accent-doux); border-color: var(--ed-accent); color: var(--ed-accent); }
+.ed-sep { width: 1px; align-self: stretch; background: var(--line); margin: 2px 4px; }
+.ed-pousse { flex: 1; }
+.ed-cadre { position: relative; }
+
+/* Le contenu reprend la typographie de l'application élève. */
+.ed-zone {
+  min-height: 340px;
+  padding: 24px 32px 48px;
+  outline: none;
+  font-size: 16px;
+  line-height: 1.65;
+  counter-reset: edpage 1;
+  overflow-wrap: break-word;
+}
+.ed-zone:has(.ed-saut)::before {
+  content: 'Page 1';
+  display: inline-block; margin-bottom: 10px; padding: 2px 10px;
+  font-size: 0.72rem; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase;
+  color: var(--ed-accent); background: var(--ed-accent-doux); border-radius: 999px;
+}
+.ed-zone > :first-child { margin-top: 0; }
+.ed-zone p { margin: 0 0 12px; }
+.ed-zone h1 { font-size: 1.4rem; }
+.ed-zone h2 { font-size: 1.25rem; color: var(--ed-accent); margin: 1.3em 0 0.5em; }
+.ed-zone h3 { font-size: 1.08rem; margin: 1.2em 0 0.4em; }
+.ed-zone ul, .ed-zone ol { margin: 0 0 12px; padding-left: 26px; }
+.ed-zone li { margin-bottom: 4px; }
+.ed-zone li::marker { color: var(--ed-accent); font-weight: 700; }
+.ed-zone blockquote {
+  margin: 14px 0; padding: 12px 14px;
+  background: var(--ed-accent-doux);
+  border-left: 4px solid var(--ed-accent);
+  border-radius: 10px;
+}
+.ed-zone table { border-collapse: collapse; margin: 14px 0; font-size: 0.92em; }
+.ed-zone th, .ed-zone td { border: 1px solid var(--line); padding: 6px 10px; }
+.ed-zone img {
+  display: block; max-width: 100%; height: auto;
+  margin: 14px 0; border-radius: 10px; border: 1px solid var(--line);
+  cursor: pointer;
+}
+.ed-zone img:hover { outline: 2px solid var(--ed-accent-doux); }
+.ed-zone img.ed-img-choisie { outline: 3px solid var(--ed-accent); }
+
+/* Saut de page : séparateur visible, non modifiable */
+.ed-saut {
+  counter-increment: edpage;
+  display: flex; align-items: center; gap: 10px;
+  margin: 26px -32px; padding: 0 12px 0 32px;
+  user-select: none; cursor: default;
+  font-size: 0.72rem; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase;
+  color: var(--ed-accent);
+}
+.ed-saut::after { content: ''; flex: 1; border-top: 2px dashed #c9bdf7; }
+.ed-saut-txt { padding: 2px 10px; background: var(--ed-accent-doux); border-radius: 999px; }
+.ed-saut-txt::before { content: 'Page ' counter(edpage); }
+.ed-saut-x { order: 2; border: none; background: none; color: var(--ink-soft); padding: 2px 6px; }
+.ed-saut-x:hover { color: var(--red); }
+
+/* Barre flottante d'une image sélectionnée */
+.ed-img-barre {
+  position: absolute; z-index: 12;
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+  max-width: 100%;
+  padding: 6px 8px;
+  background: var(--ink); color: #fff;
+  border-radius: 8px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.25);
+  font-size: 0.8rem;
+}
+.ed-img-barre button { padding: 4px 9px; font-size: 0.78rem; background: #374151; color: #fff; border-color: #4b5563; }
+.ed-img-barre button:hover { border-color: #fff; }
+.ed-img-barre button.actif { background: var(--ed-accent); border-color: var(--ed-accent); }
+.ed-img-barre button.ed-danger { background: var(--red); border-color: var(--red); }
+.ed-img-tailles { display: inline-flex; gap: 2px; }
+.ed-img-alt { width: 200px; padding: 4px 8px; border: 1px solid #4b5563; border-radius: 6px; background: #111827; color: #fff; font: inherit; }
+.ed-img-poids { color: #cbd5e1; white-space: nowrap; }
+
+.ed-depot {
+  position: absolute; inset: 0; z-index: 11;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(90, 59, 224, 0.1);
+  border: 2px dashed var(--ed-accent); border-radius: 0 0 var(--radius) var(--radius);
+  color: var(--ed-accent); font-weight: 700; font-size: 1rem;
+  pointer-events: none;
+}
+.ed-source {
+  display: block; width: 100%; min-height: 340px;
+  padding: 16px; border: none; outline: none; resize: vertical;
+  font-family: ui-monospace, Consolas, monospace; font-size: 0.82rem; line-height: 1.5;
+  border-radius: 0 0 var(--radius) var(--radius);
+}
+
+/* Fenêtre modale de confirmation (modifications non enregistrées) */
+dialog.modale {
+  width: min(460px, calc(100vw - 32px));
+  padding: 22px 24px;
+  border: none;
+  border-radius: 12px;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.3);
+  color: var(--ink);
+}
+dialog.modale::backdrop { background: rgba(31, 41, 55, 0.55); }
+dialog.modale h3 { margin: 0 0 8px; font-size: 1.05rem; }
+dialog.modale p { margin: 0 0 18px; color: var(--ink-soft); line-height: 1.5; }
+.modale-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+
+/* Éditeur compact (questions, explications) */
+.ed-compact { margin-bottom: 0; }
+.ed-compact .ed-barre { position: static; padding: 5px 6px; }
+.ed-compact .ed-btn { padding: 4px 8px; font-size: 0.8rem; }
+.ed-compact .ed-zone { min-height: 72px; padding: 12px 14px; font-size: 15px; line-height: 1.55; }
+.ed-compact .ed-zone p { margin: 0 0 8px; }
+.ed-compact .ed-zone > :last-child { margin-bottom: 0; }
+.champ .ed-img-alt { width: 200px; padding: 4px 8px; border: 1px solid #4b5563; font-size: inherit; }
+.ligne .champ.etroit { flex: 0 0 150px; }
+.champ.etroit { max-width: 220px; }
+
+/* Épreuve : une carte repliable par question */
+.q-barre { display: flex; align-items: center; justify-content: space-between; margin: 4px 2px 8px; }
+.q-carte {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  margin-bottom: 8px;
+}
+.q-carte.ouverte { border-color: #c9bdf7; box-shadow: 0 2px 10px rgba(90, 59, 224, 0.08); }
+.q-carte.glisse { opacity: 0.4; }
+.q-carte.depot-avant { box-shadow: 0 -3px 0 #5a3be0; }
+.q-carte.depot-apres { box-shadow: 0 3px 0 #5a3be0; }
+.q-entete {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 12px;
+  cursor: pointer; user-select: none;
+}
+.q-entete:hover { background: #fafbfc; border-radius: var(--radius); }
+.q-poignee { color: var(--ink-soft); cursor: grab; padding: 0 2px; }
+.q-num { white-space: nowrap; font-size: 0.88rem; }
+.q-badge {
+  flex: none; padding: 2px 8px; border-radius: 999px;
+  font-size: 0.7rem; font-weight: 700; color: #5a3be0; background: #efebfe;
+}
+.q-resume { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-soft); font-size: 0.86rem; }
+.q-actions { flex: none; display: flex; align-items: center; gap: 2px; }
+.q-chevron { color: var(--ink-soft); padding: 0 4px; }
+.q-corps { padding: 4px 16px 14px; border-top: 1px solid var(--line); }
+.q-corps > .champ:first-child { margin-top: 12px; }
+.q-ajouter { width: 100%; padding: 12px; border-style: dashed; margin-bottom: 24px; }

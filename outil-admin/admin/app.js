@@ -40,6 +40,66 @@ el.textContent = msg;
 document.body.appendChild(el);
 setTimeout(() => el.remove(), 2400);
 }
+// ============================================================================
+// Protection des modifications non enregistrées
+//
+// Un formulaire d'édition déclare gardeEdition = { actif(), enregistrer(), abandonner() }.
+// Tant que actif() est vrai, toute sortie du formulaire passe par peutQuitter(), qui
+// ouvre une fenêtre modale : Enregistrer / Quitter sans enregistrer / Continuer l'édition.
+// ============================================================================
+let gardeEdition = null;
+
+function demanderSortie() {
+  return new Promise((resolve) => {
+    const dialogue = document.createElement('dialog');
+    dialogue.className = 'modale';
+    dialogue.innerHTML = `
+      <h3>Modifications non enregistrées</h3>
+      <p>Tu as des modifications en cours. Si tu quittes sans enregistrer, elles seront perdues.</p>
+      <div class="modale-actions">
+        <button type="button" data-choix="rester">Continuer l'édition</button>
+        <button type="button" class="danger" data-choix="abandonner">Quitter sans enregistrer</button>
+        <button type="button" class="primaire" data-choix="enregistrer">Enregistrer</button>
+      </div>`;
+    dialogue.addEventListener('click', (e) => {
+      const bouton = e.target.closest('[data-choix]');
+      if (bouton) dialogue.close(bouton.dataset.choix);
+    });
+    // Échap ferme le dialogue sans valeur : on reste sur le formulaire.
+    dialogue.addEventListener('close', () => {
+      dialogue.remove();
+      resolve(dialogue.returnValue || 'rester');
+    });
+    document.body.appendChild(dialogue);
+    dialogue.showModal();
+    dialogue.querySelector('[data-choix="enregistrer"]').focus();
+  });
+}
+
+// true si l'on peut quitter le formulaire en cours (rien à perdre, enregistré, ou abandon confirmé).
+async function peutQuitter() {
+  if (!gardeEdition || !gardeEdition.actif()) return true;
+  const choix = await demanderSortie();
+  if (choix === 'enregistrer') return gardeEdition.enregistrer();
+  if (choix === 'abandonner') { gardeEdition.abandonner(); return true; }
+  return false;
+}
+
+// Clics qui font quitter le formulaire (barre latérale, en-tête) : interceptés avant leur
+// traitement, puis rejoués si la sortie est confirmée. Les boutons ▲▼ ne quittent pas le formulaire.
+function protegerSortie(racine, selecteur) {
+  racine.addEventListener('click', async (e) => {
+    if (!gardeEdition || !gardeEdition.actif()) return;
+    const cible = e.target.closest(selecteur);
+    if (!cible || e.target.closest('[data-monter], [data-descendre]')) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (await peutQuitter()) (e.target.closest('button, a') || cible).click();
+  }, true);
+}
+protegerSortie(elSidebar, 'button, [data-niveau], [data-matiere]');
+protegerSortie(document.querySelector('header'), 'button, a');
+
 function echap(s = '') {
 return String(s).replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
@@ -47,8 +107,8 @@ function genererId(prefixe) {
 return `${prefixe}-${Math.random().toString(36).slice(2, 7)}`;
 }
 
-// Comme echap(), mais laisse passer les <img src="data:image/...;base64,..."> générées
-// par l'outil d'import d'image, pour les afficher dans les aperçus.
+// Comme echap(), mais laisse passer les <img src="data:image/...;base64,..."> que l'ancien
+// bouton « Insérer une image » écrivait dans les champs texte (cf. htmlDepuisChamp).
 function echapAvecImages(s = '') {
 return echap(s).replace(
 /&lt;img src=&quot;(data:image\/[a-z+.-]+;base64,[A-Za-z0-9+\/=]+)&quot; alt=&quot;&quot;&gt;/g,
@@ -56,92 +116,118 @@ return echap(s).replace(
 );
 }
 
-// Redimensionne les images raster trop larges pour garder des JSON raisonnables.
-const IMAGE_LARGEUR_MAX = 800;
-function fichierVersDataUri(fichier) {
-return new Promise((resolve, reject) => {
-const lecteur = new FileReader();
-lecteur.onerror = () => reject(new Error('Lecture du fichier impossible.'));
-lecteur.onload = () => {
-const uri = lecteur.result;
-if (fichier.type === 'image/svg+xml' || fichier.type === 'image/gif') return resolve(uri);
-const img = new Image();
-img.onerror = () => reject(new Error("Ce fichier n'est pas une image valide."));
-img.onload = () => {
-if (img.width <= IMAGE_LARGEUR_MAX) return resolve(uri);
-const canvas = document.createElement('canvas');
-canvas.width = IMAGE_LARGEUR_MAX;
-canvas.height = Math.round(img.height * IMAGE_LARGEUR_MAX / img.width);
-canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
-resolve(canvas.toDataURL(fichier.type === 'image/png' ? 'image/png' : 'image/jpeg', 0.85));
-};
-img.src = uri;
-};
-lecteur.readAsDataURL(fichier);
-});
+// ---------------------------------------------------------------------------
+// Champs riches (question, énoncé, explication) : texte + variante HTML optionnelle
+//
+// Les données gardent toujours le champ texte (`question`, `enonce`, `explication`).
+// Dès qu'il y a de la mise en forme ou une image, la variante `*_html` est ajoutée :
+// c'est elle que l'application affiche en priorité.
+// ---------------------------------------------------------------------------
+
+// HTML à charger dans l'éditeur. Sans variante HTML, le texte est converti en paragraphes
+// (les <img base64> insérées par l'ancien bouton « Insérer une image » sont conservées).
+function htmlDepuisChamp(texte = '', html) {
+if (html) return html;
+return String(texte || '').split(/\n+/).filter((l) => l.trim()).map((l) => `<p>${echapAvecImages(l)}</p>`).join('');
 }
 
-// Ajoute un bouton « Insérer une image » sous chaque <textarea data-image> de la racine.
-// L'image est insérée en base64 à la position du curseur, sous forme de balise <img>.
-function activerImportImage(racine) {
-racine.querySelectorAll('textarea[data-image]').forEach((ta) => {
-if (ta.dataset.imageActive) return;
-ta.dataset.imageActive = '1';
-const bouton = document.createElement('button');
-bouton.type = 'button';
-bouton.className = 'discret';
-bouton.textContent = '🖼 Insérer une image';
-const input = document.createElement('input');
-input.type = 'file';
-input.accept = 'image/*';
-input.hidden = true;
-bouton.addEventListener('click', () => input.click());
-input.addEventListener('change', async () => {
-const fichier = input.files[0];
-input.value = '';
-if (!fichier) return;
-try {
-const uri = await fichierVersDataUri(fichier);
-const balise = `<img src="${uri}" alt="">`;
-const debut = ta.selectionStart ?? ta.value.length;
-const fin = ta.selectionEnd ?? ta.value.length;
-ta.value = ta.value.slice(0, debut) + balise + ta.value.slice(fin);
-ta.focus();
-ta.setSelectionRange(debut + balise.length, debut + balise.length);
-ta.dispatchEvent(new Event('input', { bubbles: true }));
-toast(`Image insérée (${Math.round(uri.length / 1024)} Ko).`);
-} catch (e) {
-toast(e.message);
-}
-});
-ta.insertAdjacentElement('afterend', bouton);
-bouton.insertAdjacentElement('afterend', input);
-});
+// Texte brut d'un HTML produit par l'éditeur (une ligne par bloc, puces pour les listes).
+function texteDepuisHtml(html = '') {
+const div = document.createElement('div');
+div.innerHTML = html;
+return [...div.children].map((b) => (/^(UL|OL)$/.test(b.tagName)
+  ? [...b.children].map((li) => `- ${li.textContent.trim()}`).join('\n')
+  : b.textContent.trim())).filter(Boolean).join('\n');
 }
 
-// Ajoute un bouton « Saut de page » sous un <textarea data-saut> : insère <break />
-// à la position du curseur (les cours sont paginés par la PWA sur cette balise).
-const REGEX_SAUT = /<\s*\/?\s*(?:break|newpage)\b[^>]*>/gi;
-function activerSautDePage(racine) {
-racine.querySelectorAll('textarea[data-saut]').forEach((ta) => {
-if (ta.dataset.sautActif) return;
-ta.dataset.sautActif = '1';
-const bouton = document.createElement('button');
-bouton.type = 'button';
-bouton.className = 'discret';
-bouton.textContent = '✂ Saut de page';
-bouton.title = "Insère <break /> : l'élève verra la suite sur une nouvelle page";
-bouton.addEventListener('click', () => {
-const balise = '\n<break />\n';
-const debut = ta.selectionStart ?? ta.value.length;
-const fin = ta.selectionEnd ?? ta.value.length;
-ta.value = ta.value.slice(0, debut) + balise + ta.value.slice(fin);
-ta.focus();
-ta.setSelectionRange(debut + balise.length, debut + balise.length);
-ta.dispatchEvent(new Event('input', { bubbles: true }));
+// { texte, html } à enregistrer : html est absent pour un simple paragraphe sans mise en forme.
+function champDepuisHtml(html = '') {
+const div = document.createElement('div');
+div.innerHTML = html;
+const blocs = [...div.children];
+const simple = blocs.length <= 1 && (!blocs[0] || (blocs[0].tagName === 'P' && blocs[0].children.length === 0));
+const texte = texteDepuisHtml(html) || (div.querySelector('img') ? '[image]' : '');
+return simple ? { texte } : { texte, html };
+}
+
+// Choix d'un QCM prêts à enregistrer : choix vides retirés, index de la bonne réponse recalé.
+// Renvoie un message d'erreur (chaîne) si le QCM est incomplet.
+function choixValides(choix, reponseCorrecte) {
+const pleins = choix.map((c, i) => ({ c: c.trim(), i })).filter((x) => x.c);
+if (pleins.length < 2) return 'Un QCM doit avoir au moins 2 choix.';
+const bonne = pleins.findIndex((x) => x.i === reponseCorrecte);
+if (bonne < 0) return 'La bonne réponse cochée est vide.';
+return { choix: pleins.map((x) => x.c), reponseCorrecte: bonne };
+}
+
+// ---------------------------------------------------------------------------
+// Formulaire d'édition : témoin « non enregistré », Ctrl+S, protection à la sortie.
+//
+// formulaire : élément contenant .etat-form, #btnValider et #btnAnnuler ;
+// enregistrer() : écrit les données, renvoie false si la saisie est invalide (après
+// avoir prévenu), lève une erreur si l'écriture échoue.
+// Renvoie marquerModifie(), à appeler à chaque modification.
+// ---------------------------------------------------------------------------
+function installerFormulaire(formulaire, enregistrer) {
+const etat = formulaire.querySelector('.etat-form');
+const btnValider = formulaire.querySelector('#btnValider');
+let modifie = false;
+const marquerModifie = () => {
+  if (modifie) return;
+  modifie = true;
+  etat.textContent = '● Modifications non enregistrées';
+};
+
+async function sauver() {
+  btnValider.disabled = true;
+  let ok = false;
+  try {
+    ok = await enregistrer();
+  } catch (err) {
+    toast('Échec de l’enregistrement : ' + (err && err.message ? err.message : err));
+  }
+  if (ok) modifie = false; else btnValider.disabled = false;
+  return ok;
+}
+
+// Ctrl+S enregistre ; fermer l'onglet avec des modifications demande confirmation.
+// Les deux écouteurs se retirent d'eux-mêmes quand le formulaire n'est plus affiché.
+const surTouche = (e) => {
+  if (!formulaire.isConnected) { document.removeEventListener('keydown', surTouche); return; }
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') { e.preventDefault(); btnValider.click(); }
+};
+document.addEventListener('keydown', surTouche);
+const avantFermeture = (e) => {
+  if (!formulaire.isConnected) { window.removeEventListener('beforeunload', avantFermeture); return; }
+  if (modifie) e.preventDefault();
+};
+window.addEventListener('beforeunload', avantFermeture);
+
+// Quitter le formulaire (Annuler, clic dans la barre latérale ou l'en-tête) avec des
+// modifications en cours ouvre la fenêtre de confirmation (cf. peutQuitter).
+gardeEdition = {
+  actif: () => formulaire.isConnected && modifie,
+  enregistrer: sauver,
+  abandonner: () => { modifie = false; },
+};
+formulaire.querySelector('#btnAnnuler').addEventListener('click', async () => {
+  if (await peutQuitter()) renderMatiereDetail();
 });
-ta.insertAdjacentElement('afterend', bouton);
+btnValider.addEventListener('click', async () => {
+  if (await sauver()) await renderMatiereDetail();
 });
+return marquerModifie;
+}
+
+// Barre d'actions commune aux formulaires d'édition.
+function barreFormulaire(titre) {
+return `
+    <div class="barre-form">
+      <h3>${titre}</h3>
+      <span class="etat-form"></span>
+      <button id="btnAnnuler">Annuler</button>
+      <button class="primaire" id="btnValider" title="Ctrl+S">Enregistrer</button>
+    </div>`;
 }
 
 // ============================================================================
@@ -208,7 +294,7 @@ await bumpVersion(await getOrCreateDir(matDir, matiere.id));
 
 // racine : élément contenant les lignes ; liste : tableau (modifié sur place) ;
 // enregistrer : écrit sur disque/serveur ; rerendre : réaffiche après enregistrement.
-function activerReordonnancement(racine, liste, enregistrer, rerendre) {
+function activerReordonnancement(racine, liste, enregistrer, rerendre, { silencieux = false } = {}) {
 const indexDe = (el) => liste.findIndex((x) => String(x.id) === el.dataset.ordreId);
 let glisse = null; // id de la ligne en cours de déplacement
 
@@ -218,7 +304,7 @@ async function deplacer(de, vers) {
   liste.splice(vers, 0, element);
   try {
     await enregistrer();
-    toast('Ordre enregistré.');
+    if (!silencieux) toast('Ordre enregistré.');
   } catch (err) {
     toast('Échec de l’enregistrement de l’ordre : ' + (err && err.message ? err.message : err));
   }
@@ -237,6 +323,7 @@ racine.querySelectorAll('[data-ordre-id]').forEach((el) => {
   if (bas) bas.addEventListener('click', (e) => { e.stopPropagation(); deplacer(i, i + 1); });
 
   el.addEventListener('dragstart', (e) => {
+    if (e.target !== el) return; // glissement d'un contenu de la ligne (image d'un éditeur…)
     glisse = el.dataset.ordreId;
     e.dataTransfer.effectAllowed = 'move';
     e.dataTransfer.setData('text/plain', glisse); // requis par Firefox
@@ -680,87 +767,32 @@ activerReordonnancement(conteneur, liste, () => enregistrerOrdreMatiere('cours',
 function ouvrirFormCours(matiere, cours, liste) {
 const estEdition = !!cours;
 elMain.innerHTML = `
-  <div class="editeur-avec-apercu">
-    <div class="editeur-col">
-      <div class="carte" style="flex-shrink:0">
-        <h3>${estEdition ? 'Modifier le cours' : 'Nouveau cours'}</h3>
-        <div class="champ"><label>Titre</label><input id="fTitre" value="${estEdition ? echap(cours.titre) : ''}" /></div>
-        <div class="champ"><label>Résumé (affiché dans la liste)</label><input id="fResume" value="${estEdition ? echap(cours.resume || '') : ''}" /></div>
-        <div class="champ">
-          <label>Contenu (HTML simple : h2, p, ul/li, strong, em ; &lt;break /&gt; = saut de page)</label>
-          <textarea data-image data-saut id="fContenu" style="min-height:180px">${estEdition ? echap(cours.contenu || '') : ''}</textarea>
-        </div>
-        <div style="display:flex;gap:8px">
-          <button class="primaire" id="btnValider">Enregistrer</button>
-          <button id="btnAnnuler">Annuler</button>
-        </div>
+  <div class="form-contenu">
+    ${barreFormulaire(estEdition ? 'Modifier le cours' : 'Nouveau cours')}
+    <div class="carte">
+      <div class="ligne">
+        <div class="champ"><label>Titre</label><input id="fTitre" value="${estEdition ? echap(cours.titre) : ''}" placeholder="ex : Les fractions" /></div>
+        <div class="champ"><label>Résumé (affiché dans la liste des cours)</label><input id="fResume" value="${estEdition ? echap(cours.resume || '') : ''}" /></div>
       </div>
     </div>
-    <div class="apercu-col">
-      <div class="apercu-header">Aperçu</div>
-      <div class="apercu-contenu" id="apercuCours">
-        <div class="apercu-vide">L'aperçu s'affichera ici…</div>
-      </div>
-    </div>
+    <div id="fContenu"></div>
   </div>`;
 
-activerImportImage(elMain);
-activerSautDePage(elMain);
-const inputTitre = document.getElementById('fTitre');
-const inputResume = document.getElementById('fResume');
-const textareaContenu = document.getElementById('fContenu');
-const apercuCours = document.getElementById('apercuCours');
-
-// Aperçu paginé comme dans la PWA : une page par segment délimité par <break /> / <newpage />,
-// avec une barre de navigation collée en bas de la colonne d'aperçu.
-let pageApercu = 0;
-const pagerApercu = document.createElement('nav');
-pagerApercu.className = 'apercu-pager';
-pagerApercu.hidden = true;
-pagerApercu.innerHTML = `
-  <button type="button" data-dir="-1">‹ Précédent</button>
-  <span class="apercu-pager-info"></span>
-  <button type="button" data-dir="1">Suivant ›</button>`;
-apercuCours.closest('.apercu-contenu').insertAdjacentElement('afterend', pagerApercu);
-pagerApercu.addEventListener('click', (e) => {
-  const b = e.target.closest('button[data-dir]');
-  if (!b) return;
-  pageApercu += Number(b.dataset.dir);
-  mettreAJourApercu();
-  apercuCours.closest('.apercu-col').scrollTo({ top: 0 });
+const marquerModifie = installerFormulaire(elMain.querySelector('.form-contenu'), enregistrer);
+const editeur = creerEditeurRiche(document.getElementById('fContenu'), {
+  html: estEdition ? cours.contenu || '' : '',
+  surModification: marquerModifie,
+  notifier: toast,
 });
+document.getElementById('fTitre').addEventListener('input', marquerModifie);
+document.getElementById('fResume').addEventListener('input', marquerModifie);
+if (!estEdition) document.getElementById('fTitre').focus();
 
-function mettreAJourApercu() {
-  const titre = inputTitre.value.trim();
-  const contenu = textareaContenu.value.trim();
-  if (!titre && !contenu) {
-    apercuCours.innerHTML = '<div class="apercu-vide">L\'aperçu s\'affichera ici…</div>';
-    pagerApercu.hidden = true;
-    return;
-  }
-  const pages = contenu.split(REGEX_SAUT).filter((p) => p.trim());
-  if (!pages.length) pages.push('');
-  pageApercu = Math.min(Math.max(pageApercu, 0), pages.length - 1);
-  apercuCours.innerHTML = `
-    ${titre && pageApercu === 0 ? `<h2>${echap(titre)}</h2>` : ''}
-    ${pages[pageApercu]}`;
-  pagerApercu.hidden = pages.length < 2;
-  pagerApercu.querySelector('.apercu-pager-info').textContent = `${pageApercu + 1} / ${pages.length}`;
-  const [prec, suiv] = pagerApercu.querySelectorAll('button');
-  prec.disabled = pageApercu === 0;
-  suiv.disabled = pageApercu === pages.length - 1;
-}
-
-inputTitre.addEventListener('input', mettreAJourApercu);
-textareaContenu.addEventListener('input', mettreAJourApercu);
-mettreAJourApercu();
-
-document.getElementById('btnAnnuler').addEventListener('click', () => renderMatiereDetail());
-document.getElementById('btnValider').addEventListener('click', async () => {
+async function enregistrer() {
   const titre = document.getElementById('fTitre').value.trim();
   const resume = document.getElementById('fResume').value.trim();
-  const contenu = document.getElementById('fContenu').value;
-  if (!titre) { toast('Le titre est obligatoire.'); return; }
+  if (!titre) { toast('Le titre est obligatoire.'); document.getElementById('fTitre').focus(); return false; }
+  const contenu = editeur.getHtml();
 
   const id = estEdition ? cours.id : genererId(`${matiere.id}-c`);
   const coursDir = await getOrCreateDir(state.niveauDir, 'cours');
@@ -780,8 +812,8 @@ document.getElementById('btnValider').addEventListener('click', async () => {
   await bumpVersion(dirMatiere);
 
   toast(estEdition ? 'Cours modifié.' : 'Cours créé.');
-  await renderMatiereDetail();
-});
+  return true;
+}
 }
 
 async function supprimerCours(matiere, id, liste) {
@@ -839,12 +871,13 @@ conteneur.querySelectorAll('[data-supprimer]').forEach((btn) => {
 activerReordonnancement(conteneur, liste, () => enregistrerOrdreMatiere('exercices', matiere, liste), renderMatiereDetail);
 }
 
-function renderChoixEditeur(choix, reponseCorrecte) {
+// Lignes de choix d'un QCM. groupe : nom du groupe de boutons radio (unique par question).
+function renderChoixEditeur(choix, reponseCorrecte, groupe = 'reponseCorrecte') {
 return choix.map((c, i) => `
   <div class="choix-ligne" data-choix-index="${i}">
-    <input type="radio" name="reponseCorrecte" value="${i}" ${i === reponseCorrecte ? 'checked' : ''} title="Bonne réponse" />
+    <input type="radio" name="${echap(groupe)}" value="${i}" ${i === reponseCorrecte ? 'checked' : ''} title="Bonne réponse" />
     <input type="text" class="valeur-choix" value="${echap(c)}" placeholder="Choix ${i + 1}" />
-    <button type="button" class="discret" data-retirer-choix="${i}">✕</button>
+    <button type="button" class="discret" data-retirer-choix="${i}" title="Retirer ce choix">✕</button>
   </div>`).join('');
 }
 
@@ -854,147 +887,119 @@ let type = estEdition ? exercice.type : 'qcm';
 let choix = estEdition && exercice.choix ? [...exercice.choix] : ['', ''];
 let reponseCorrecte = estEdition ? (exercice.reponseCorrecte ?? 0) : 0;
 
-function rendreFormulaire() {
-  elMain.innerHTML = `
-    <div class="editeur-avec-apercu">
-      <div class="editeur-col">
-        <div class="carte" style="flex-shrink:0">
-          <h3>${estEdition ? "Modifier l'exercice" : 'Nouvel exercice'}</h3>
-          <div class="champ"><label>Titre (affiché dans la liste)</label><input id="fTitre" value="${estEdition ? echap(exercice.titre) : ''}" /></div>
-          <div class="ligne">
-            <div class="champ">
-              <label>Difficulté</label>
-              <select id="fDifficulte">
-                ${['Facile', 'Moyen', 'Difficile'].map((d) => `<option ${estEdition && exercice.difficulte === d ? 'selected' : ''}>${d}</option>`).join('')}
-              </select>
-            </div>
-            <div class="champ">
-              <label>Type</label>
-              <select id="fType">
-                <option value="qcm" ${type === 'qcm' ? 'selected' : ''}>QCM</option>
-                <option value="texte" ${type === 'texte' ? 'selected' : ''}>Question ouverte</option>
-              </select>
-            </div>
-          </div>
-          <div class="champ"><label>Question</label><textarea data-image id="fQuestion" style="min-height:100px">${estEdition ? echap(exercice.question || '') : ''}</textarea></div>
-          <div id="zoneChoix"></div>
-          <div class="champ"><label>Explication (correction affichée à l'élève)</label><textarea data-image id="fExplication" style="min-height:80px">${estEdition ? echap(exercice.explication || '') : ''}</textarea></div>
-          <div style="display:flex;gap:8px">
-            <button class="primaire" id="btnValider">Enregistrer</button>
-            <button id="btnAnnuler">Annuler</button>
-          </div>
+elMain.innerHTML = `
+  <div class="form-contenu">
+    ${barreFormulaire(estEdition ? "Modifier l'exercice" : 'Nouvel exercice')}
+    <div class="carte">
+      <div class="ligne">
+        <div class="champ"><label>Titre (affiché dans la liste)</label><input id="fTitre" value="${estEdition ? echap(exercice.titre) : ''}" /></div>
+        <div class="champ etroit">
+          <label>Difficulté</label>
+          <select id="fDifficulte">
+            ${['Facile', 'Moyen', 'Difficile'].map((d) => `<option ${estEdition && exercice.difficulte === d ? 'selected' : ''}>${d}</option>`).join('')}
+          </select>
+        </div>
+        <div class="champ etroit">
+          <label>Type</label>
+          <select id="fType">
+            <option value="qcm" ${type === 'qcm' ? 'selected' : ''}>QCM</option>
+            <option value="texte" ${type === 'texte' ? 'selected' : ''}>Question ouverte</option>
+          </select>
         </div>
       </div>
-      <div class="apercu-col">
-        <div class="apercu-header">Aperçu</div>
-        <div class="apercu-contenu" id="apercuExercice">
-          <div class="apercu-vide">L'aperçu s'affichera ici…</div>
-        </div>
-      </div>
+    </div>
+    <div class="carte">
+      <div class="champ"><label>Question</label><div id="fQuestion"></div></div>
+      <div id="zoneChoix"></div>
+      <div class="champ"><label>Explication (correction affichée à l'élève)</label><div id="fExplication"></div></div>
+    </div>
+  </div>`;
+
+const marquerModifie = installerFormulaire(elMain.querySelector('.form-contenu'), enregistrer);
+const options = { compact: true, surModification: marquerModifie, notifier: toast };
+const edQuestion = creerEditeurRiche(document.getElementById('fQuestion'),
+  { ...options, html: estEdition ? htmlDepuisChamp(exercice.question, exercice.question_html) : '' });
+const edExplication = creerEditeurRiche(document.getElementById('fExplication'),
+  { ...options, html: estEdition ? htmlDepuisChamp(exercice.explication, exercice.explication_html) : '' });
+
+const zoneChoix = document.getElementById('zoneChoix');
+function rendreChoix() {
+  if (type !== 'qcm') { zoneChoix.innerHTML = ''; return; }
+  zoneChoix.innerHTML = `
+    <div class="champ">
+      <label>Choix (coche la bonne réponse)</label>
+      ${renderChoixEditeur(choix, reponseCorrecte)}
+      <button type="button" id="btnAjouterChoix" style="margin-top:4px">+ Ajouter un choix</button>
     </div>`;
-
-  activerImportImage(elMain);
-  const zoneChoix = document.getElementById('zoneChoix');
-  const apercuExercice = document.getElementById('apercuExercice');
-
-  function mettreAJourApercuExercice() {
-    const question = document.getElementById('fQuestion').value.trim();
-    const explication = document.getElementById('fExplication').value.trim();
-    if (!question) {
-      apercuExercice.innerHTML = '<div class="apercu-vide">L\'aperçu s\'affichera ici…</div>';
-      return;
-    }
-    let html = `<h3>Question</h3><p>${echapAvecImages(question)}</p>`;
-    if (type === 'qcm') {
-      if (choix.some((c) => c.trim())) {
-        html += `<h3>Réponses</h3><ul>`;
-        choix.forEach((c, i) => {
-          if (!c.trim()) return;
-          const estBonne = i === reponseCorrecte ? ' ✓ <strong>(bonne)</strong>' : '';
-          html += `<li>${echap(c)}${estBonne}</li>`;
-        });
-        html += `</ul>`;
-      }
-    }
-    if (explication) {
-      html += `<h3>Correction</h3><p>${echapAvecImages(explication)}</p>`;
-    }
-    apercuExercice.innerHTML = html;
-  }
-
-  function rendreChoix() {
-    if (type !== 'qcm') { zoneChoix.innerHTML = ''; return; }
-    zoneChoix.innerHTML = `
-      <div class="champ">
-        <label>Choix (coche la bonne réponse)</label>
-        ${renderChoixEditeur(choix, reponseCorrecte)}
-        <button type="button" id="btnAjouterChoix" style="margin-top:4px">+ Ajouter un choix</button>
-      </div>`;
-    zoneChoix.querySelectorAll('.valeur-choix').forEach((input, i) => {
-      input.addEventListener('input', () => { choix[i] = input.value; mettreAJourApercuExercice(); });
-    });
-    zoneChoix.querySelectorAll('[name="reponseCorrecte"]').forEach((radio) => {
-      radio.addEventListener('change', () => { reponseCorrecte = Number(radio.value); mettreAJourApercuExercice(); });
-    });
-    zoneChoix.querySelectorAll('[data-retirer-choix]').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        const i = Number(btn.dataset.retirerChoix);
-        choix.splice(i, 1);
-        if (reponseCorrecte >= choix.length) reponseCorrecte = 0;
-        rendreChoix();
-        mettreAJourApercuExercice();
-      });
-    });
-    document.getElementById('btnAjouterChoix').addEventListener('click', () => {
-      choix.push('');
+  zoneChoix.querySelectorAll('.valeur-choix').forEach((input, i) => {
+    input.addEventListener('input', () => { choix[i] = input.value; marquerModifie(); });
+  });
+  zoneChoix.querySelectorAll('[type="radio"]').forEach((radio) => {
+    radio.addEventListener('change', () => { reponseCorrecte = Number(radio.value); marquerModifie(); });
+  });
+  zoneChoix.querySelectorAll('[data-retirer-choix]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const i = Number(btn.dataset.retirerChoix);
+      choix.splice(i, 1);
+      if (reponseCorrecte === i) reponseCorrecte = 0;
+      else if (reponseCorrecte > i) reponseCorrecte--;
+      marquerModifie();
       rendreChoix();
     });
-  }
-  rendreChoix();
-  mettreAJourApercuExercice();
-
-  document.getElementById('fQuestion').addEventListener('input', mettreAJourApercuExercice);
-  document.getElementById('fExplication').addEventListener('input', mettreAJourApercuExercice);
-  document.getElementById('fType').addEventListener('change', (e) => {
-    type = e.target.value;
-    rendreChoix();
-    mettreAJourApercuExercice();
   });
-  document.getElementById('btnAnnuler').addEventListener('click', () => renderMatiereDetail());
-  document.getElementById('btnValider').addEventListener('click', async () => {
-    const titre = document.getElementById('fTitre').value.trim();
-    const difficulte = document.getElementById('fDifficulte').value;
-    const question = document.getElementById('fQuestion').value.trim();
-    const explication = document.getElementById('fExplication').value.trim();
-    if (!titre || !question) { toast('Titre et question sont obligatoires.'); return; }
-    if (type === 'qcm' && choix.filter((c) => c.trim()).length < 2) { toast('Au moins 2 choix sont nécessaires pour un QCM.'); return; }
-
-    const id = estEdition ? exercice.id : genererId(`${matiere.id}-e`);
-    const dirListe = await getOrCreateDir(state.niveauDir, 'exercices');
-    const dirDetail = await getOrCreateDir(state.niveauDir, 'exercices-detail');
-
-    if (estEdition) {
-      const item = liste.find((e) => e.id === id);
-      item.titre = titre; item.difficulte = difficulte;
-    } else {
-      liste.push({ id, titre, difficulte });
-    }
-    await writeJson(dirListe, `${matiere.id}.json`, liste);
-
-    const detail = { id, type, question, explication };
-    if (type === 'qcm') { detail.choix = choix; detail.reponseCorrecte = reponseCorrecte; }
-    await writeJson(dirDetail, `${id}.json`, detail);
-
-    const matDir = await getOrCreateDir(state.niveauDir, 'matieres');
-    const dirMatiere = await getOrCreateDir(matDir, matiere.id);
-    await bumpVersion(dirMatiere);
-
-    toast(estEdition ? 'Exercice modifié.' : 'Exercice créé.');
-    await renderMatiereDetail();
+  document.getElementById('btnAjouterChoix').addEventListener('click', () => {
+    choix.push('');
+    marquerModifie();
+    rendreChoix();
+    zoneChoix.querySelector('.choix-ligne:last-of-type .valeur-choix').focus();
   });
 }
+rendreChoix();
 
-rendreFormulaire();
+document.getElementById('fTitre').addEventListener('input', marquerModifie);
+document.getElementById('fDifficulte').addEventListener('change', marquerModifie);
+document.getElementById('fType').addEventListener('change', (e) => {
+  type = e.target.value;
+  marquerModifie();
+  rendreChoix();
+});
+if (!estEdition) document.getElementById('fTitre').focus();
+
+async function enregistrer() {
+  const titre = document.getElementById('fTitre').value.trim();
+  const difficulte = document.getElementById('fDifficulte').value;
+  const question = champDepuisHtml(edQuestion.getHtml());
+  const explication = champDepuisHtml(edExplication.getHtml());
+  if (!titre || !question.texte) { toast('Titre et question sont obligatoires.'); return false; }
+  const qcm = type === 'qcm' ? choixValides(choix, reponseCorrecte) : null;
+  if (typeof qcm === 'string') { toast(qcm); return false; }
+
+  const id = estEdition ? exercice.id : genererId(`${matiere.id}-e`);
+  const dirListe = await getOrCreateDir(state.niveauDir, 'exercices');
+  const dirDetail = await getOrCreateDir(state.niveauDir, 'exercices-detail');
+
+  if (estEdition) {
+    const item = liste.find((e) => e.id === id);
+    item.titre = titre; item.difficulte = difficulte;
+  } else {
+    liste.push({ id, titre, difficulte });
+  }
+  await writeJson(dirListe, `${matiere.id}.json`, liste);
+
+  const detail = { id, type, question: question.texte };
+  if (question.html) detail.question_html = question.html;
+  if (qcm) { detail.choix = qcm.choix; detail.reponseCorrecte = qcm.reponseCorrecte; }
+  detail.explication = explication.texte;
+  if (explication.html) detail.explication_html = explication.html;
+  await writeJson(dirDetail, `${id}.json`, detail);
+
+  const matDir = await getOrCreateDir(state.niveauDir, 'matieres');
+  const dirMatiere = await getOrCreateDir(matDir, matiere.id);
+  await bumpVersion(dirMatiere);
+
+  toast(estEdition ? 'Exercice modifié.' : 'Exercice créé.');
+  return true;
+}
 }
 
 async function supprimerExercice(matiere, id, liste) {
@@ -1055,194 +1060,234 @@ activerReordonnancement(conteneur, liste, () => enregistrerOrdreMatiere('epreuve
 
 function ouvrirFormEpreuve(matiere, epreuve, liste) {
 const estEdition = !!epreuve;
-let questions = estEdition ? epreuve.questions.map((q) => ({ ...q, choix: q.choix ? [...q.choix] : undefined })) : [];
 
-function rendreFormulaire() {
-  elMain.innerHTML = `
-    <div class="editeur-avec-apercu">
-      <div class="editeur-col">
-        <div class="carte" style="flex-shrink:0">
-          <h3>${estEdition ? "Modifier l'épreuve" : 'Nouvelle épreuve'}</h3>
-          <div class="ligne">
-            <div class="champ"><label>Titre</label><input id="fTitre" value="${estEdition ? echap(epreuve.titre) : ''}" /></div>
-            <div class="champ"><label>Durée (minutes)</label><input id="fDuree" type="number" min="1" value="${estEdition ? epreuve.dureeMinutes : 20}" /></div>
-            <div class="champ"><label>Barème</label><input id="fBareme" type="number" min="1" value="${estEdition ? (epreuve.bareme || 20) : 20}" /></div>
-          </div>
-          <div class="champ">
-            <label>Questions</label>
-            <div id="zoneQuestions"></div>
-            <button type="button" id="btnAjouterQuestion">+ Ajouter une question</button>
-          </div>
-          <div id="fErreur" class="badge-erreur"></div>
-          <div style="display:flex;gap:8px;margin-top:10px">
-            <button class="primaire" id="btnValider">Enregistrer</button>
-            <button id="btnAnnuler">Annuler</button>
-          </div>
-        </div>
+// Modèle de travail : une entrée par question, avec le HTML en cours d'édition.
+// `ouvert` : carte dépliée (les éditeurs n'existent que pour les cartes ouvertes).
+const nouvelleQuestion = () => ({
+  id: genererId(`${matiere.id}-q`), type: 'qcm', enonceHtml: '', choix: ['', ''], reponseCorrecte: 0, explicationHtml: '', ouvert: true,
+});
+const questions = estEdition ? (epreuve.questions || []).map((q) => ({
+  id: q.id || genererId(`${matiere.id}-q`),
+  type: q.type === 'texte' ? 'texte' : 'qcm',
+  enonceHtml: htmlDepuisChamp(q.enonce, q.enonce_html),
+  choix: q.choix ? [...q.choix] : ['', ''],
+  reponseCorrecte: q.reponseCorrecte ?? 0,
+  explicationHtml: htmlDepuisChamp(q.explication, q.explication_html),
+  ouvert: false,
+})) : [nouvelleQuestion()];
+
+elMain.innerHTML = `
+  <div class="form-contenu">
+    ${barreFormulaire(estEdition ? "Modifier l'épreuve" : 'Nouvelle épreuve')}
+    <div class="carte">
+      <div class="ligne">
+        <div class="champ"><label>Titre</label><input id="fTitre" value="${estEdition ? echap(epreuve.titre) : ''}" /></div>
+        <div class="champ etroit"><label>Durée (minutes)</label><input id="fDuree" type="number" min="1" value="${estEdition ? epreuve.dureeMinutes : 20}" /></div>
+        <div class="champ etroit"><label>Barème</label><input id="fBareme" type="number" min="1" value="${estEdition ? (epreuve.bareme || 20) : 20}" /></div>
       </div>
-      <div class="apercu-col">
-        <div class="apercu-header">Aperçu de l'épreuve</div>
-        <div class="apercu-contenu" id="apercuEpreuve">
-          <div class="apercu-vide">L'aperçu s'affichera ici…</div>
-        </div>
-      </div>
-    </div>`;
+    </div>
+    <div class="q-barre">
+      <strong id="qCompte"></strong>
+      <span>
+        <button type="button" class="discret" id="btnToutReplier">Tout replier</button>
+        <button type="button" class="discret" id="btnToutDeplier">Tout déplier</button>
+      </span>
+    </div>
+    <div id="zoneQuestions"></div>
+    <button type="button" id="btnAjouterQuestion" class="q-ajouter">+ Ajouter une question</button>
+  </div>`;
 
-  const zoneQuestions = document.getElementById('zoneQuestions');
-  const apercuEpreuve = document.getElementById('apercuEpreuve');
+const marquerModifie = installerFormulaire(elMain.querySelector('.form-contenu'), enregistrer);
+const zoneQuestions = document.getElementById('zoneQuestions');
+let editeurs = new Map(); // id de question → { enonce, explication } (cartes ouvertes seulement)
 
-  function mettreAJourApercuEpreuve() {
-    const titre = document.getElementById('fTitre').value.trim();
-    const duree = document.getElementById('fDuree').value;
-    const bareme = document.getElementById('fBareme').value;
-    const questionsValides = questions.filter((q) => q.enonce && q.enonce.trim());
-    if (!titre && questionsValides.length === 0) {
-      apercuEpreuve.innerHTML = '<div class="apercu-vide">L\'aperçu s\'affichera ici…</div>';
-      return;
-    }
-    let html = '';
-    if (titre) html += `<h2>${echap(titre)}</h2>`;
-    if (duree || bareme) html += `<p><strong>Infos :</strong> ${duree} min • Barème: ${bareme}</p>`;
-    questionsValides.forEach((q, i) => {
-      html += `<div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--line)">`;
-      html += `<h3>Q${i + 1}. ${echapAvecImages(q.enonce)}</h3>`;
-      if (q.type === 'qcm' && q.choix && q.choix.length > 0) {
-        html += `<ul>`;
-        q.choix.forEach((c, ci) => {
-          if (c.trim()) {
-            const estBonne = ci === (q.reponseCorrecte ?? 0) ? ' ✓ <strong>(bonne)</strong>' : '';
-            html += `<li>${echap(c)}${estBonne}</li>`;
-          }
-        });
-        html += `</ul>`;
-      }
-      if (q.explication && q.explication.trim()) {
-        html += `<p><em>Correction : ${echapAvecImages(q.explication)}</em></p>`;
-      }
-      html += `</div>`;
-    });
-    apercuEpreuve.innerHTML = html || '<div class="apercu-vide">L\'aperçu s\'affichera ici…</div>';
+// Recopie le contenu des éditeurs ouverts dans le modèle (avant tout réaffichage ou enregistrement).
+function synchroniser() {
+  for (const q of questions) {
+    const ed = editeurs.get(q.id);
+    if (!ed) continue;
+    q.enonceHtml = ed.enonce.getHtml();
+    q.explicationHtml = ed.explication.getHtml();
   }
+}
+// Modifie le modèle puis réaffiche les cartes.
+function appliquer(action) {
+  synchroniser();
+  action();
+  marquerModifie();
+  rendreQuestions();
+}
 
-  function rendreQuestions() {
-    zoneQuestions.innerHTML = questions.length === 0
-      ? '<p class="vide">Aucune question — ajoutes-en au moins une.</p>'
-      : questions.map((q, i) => `
-        <div class="question-editeur" data-question-index="${i}">
-          <div class="entete">
-            <strong>Question ${i + 1}</strong>
-            <button type="button" class="discret" data-retirer-question="${i}">✕ Retirer</button>
-          </div>
-          <div class="champ">
+function rendreQuestions() {
+  document.getElementById('qCompte').textContent = `Questions (${questions.length})`;
+  zoneQuestions.innerHTML = questions.length === 0
+    ? '<p class="vide">Aucune question — ajoutes-en au moins une.</p>'
+    : questions.map((q, i) => {
+      const resume = texteDepuisHtml(q.enonceHtml).replace(/\s+/g, ' ') || (q.enonceHtml.includes('<img') ? '(image)' : 'Énoncé à rédiger…');
+      return `
+      <div class="q-carte ${q.ouvert ? 'ouverte' : ''}" data-ordre-id="${echap(q.id)}">
+        <div class="q-entete" title="${q.ouvert ? 'Replier' : 'Déplier pour modifier'}">
+          <span class="q-poignee" title="Glisser pour réordonner">⠿</span>
+          <strong class="q-num">Question ${i + 1}</strong>
+          <span class="q-badge">${q.type === 'qcm' ? 'QCM' : 'Ouverte'}</span>
+          <span class="q-resume">${echap(resume)}</span>
+          <span class="q-actions">
+            ${boutonsOrdre(i, questions.length)}
+            <button type="button" class="discret" data-dupliquer title="Créer une copie de cette question">⧉ Dupliquer</button>
+            <button type="button" class="discret" data-retirer title="Retirer cette question">✕ Retirer</button>
+            <span class="q-chevron">${q.ouvert ? '▴' : '▾'}</span>
+          </span>
+        </div>
+        ${q.ouvert ? `
+        <div class="q-corps">
+          <div class="champ etroit">
             <label>Type</label>
-            <select class="q-type" data-i="${i}">
+            <select class="q-type">
               <option value="qcm" ${q.type === 'qcm' ? 'selected' : ''}>QCM</option>
               <option value="texte" ${q.type === 'texte' ? 'selected' : ''}>Question ouverte</option>
             </select>
           </div>
-          <div class="champ"><label>Énoncé</label><textarea data-image class="q-enonce" data-i="${i}">${echap(q.enonce || '')}</textarea></div>
+          <div class="champ"><label>Énoncé</label><div class="q-enonce"></div></div>
           ${q.type === 'qcm' ? `
             <div class="champ">
               <label>Choix (coche la bonne réponse)</label>
-              ${renderChoixEditeur(q.choix || ['', ''], q.reponseCorrecte ?? 0)}
-              <button type="button" data-ajouter-choix-question="${i}">+ Ajouter un choix</button>
+              ${renderChoixEditeur(q.choix, q.reponseCorrecte, `rc-${q.id}`)}
+              <button type="button" data-ajouter-choix style="margin-top:4px">+ Ajouter un choix</button>
             </div>` : ''}
-          <div class="champ"><label>Explication</label><textarea data-image class="q-explication" data-i="${i}">${echap(q.explication || '')}</textarea></div>
-        </div>`).join('');
+          <div class="champ"><label>Explication (correction affichée à l'élève)</label><div class="q-explication"></div></div>
+        </div>` : ''}
+      </div>`;
+    }).join('');
 
-    activerImportImage(zoneQuestions);
-    // Câblage des champs simples
-    zoneQuestions.querySelectorAll('.q-type').forEach((sel) => {
-      sel.addEventListener('change', () => {
-        const i = Number(sel.dataset.i);
-        questions[i].type = sel.value;
-        if (sel.value === 'qcm' && !questions[i].choix) { questions[i].choix = ['', '']; questions[i].reponseCorrecte = 0; }
-        rendreQuestions();
-        mettreAJourApercuEpreuve();
-      });
+  editeurs = new Map();
+  zoneQuestions.querySelectorAll('.q-carte').forEach((carte, i) => {
+    const q = questions[i];
+    const entete = carte.querySelector('.q-entete');
+
+    // La carte ne devient déplaçable que lorsqu'on la saisit par sa poignée
+    // (sinon la sélection de texte dans les éditeurs lancerait un déplacement).
+    carte.querySelector('.q-poignee').addEventListener('mousedown', () => { carte.draggable = true; });
+    carte.addEventListener('dragend', () => { carte.draggable = false; });
+    entete.addEventListener('mouseup', () => { carte.draggable = false; });
+
+    entete.addEventListener('click', (e) => {
+      if (e.target.closest('button, .q-poignee')) return;
+      appliquerSansModif(() => { q.ouvert = !q.ouvert; });
     });
-    zoneQuestions.querySelectorAll('.q-enonce').forEach((ta) => {
-      ta.addEventListener('input', () => { questions[Number(ta.dataset.i)].enonce = ta.value; mettreAJourApercuEpreuve(); });
+    carte.querySelector('[data-dupliquer]').addEventListener('click', () => appliquer(() => {
+      questions.splice(i + 1, 0, { ...q, choix: [...q.choix], id: genererId(`${matiere.id}-q`), ouvert: true });
+    }));
+    carte.querySelector('[data-retirer]').addEventListener('click', () => {
+      const vide = !q.enonceHtml && !editeurs.get(q.id)?.enonce.getHtml();
+      if (!vide && !confirm(`Retirer la question ${i + 1} ?`)) return;
+      appliquer(() => { questions.splice(i, 1); });
     });
-    zoneQuestions.querySelectorAll('.q-explication').forEach((ta) => {
-      ta.addEventListener('input', () => { questions[Number(ta.dataset.i)].explication = ta.value; mettreAJourApercuEpreuve(); });
+    if (!q.ouvert) return;
+
+    const options = { compact: true, surModification: marquerModifie, notifier: toast };
+    editeurs.set(q.id, {
+      enonce: creerEditeurRiche(carte.querySelector('.q-enonce'), { ...options, html: q.enonceHtml }),
+      explication: creerEditeurRiche(carte.querySelector('.q-explication'), { ...options, html: q.explicationHtml }),
     });
-    zoneQuestions.querySelectorAll('[data-retirer-question]').forEach((btn) => {
-      btn.addEventListener('click', () => { questions.splice(Number(btn.dataset.retirerQuestion), 1); rendreQuestions(); mettreAJourApercuEpreuve(); });
+    carte.querySelector('.q-type').addEventListener('change', (e) => appliquer(() => { q.type = e.target.value; }));
+    carte.querySelectorAll('.valeur-choix').forEach((input, ci) => {
+      input.addEventListener('input', () => { q.choix[ci] = input.value; marquerModifie(); });
     });
-    document.getElementById('btnAjouterQuestion') && document.getElementById('btnAjouterQuestion').addEventListener('click', () => {
-      questions.push({ id: genererId(`${matiere.id}-q`), type: 'qcm', enonce: '', choix: ['', ''], reponseCorrecte: 0, explication: '' });
-      rendreQuestions();
-      mettreAJourApercuEpreuve();
+    carte.querySelectorAll('[type="radio"]').forEach((radio) => {
+      radio.addEventListener('change', () => { q.reponseCorrecte = Number(radio.value); marquerModifie(); });
     });
-
-    // Câblage des sous-éditeurs de choix (par question)
-    zoneQuestions.querySelectorAll('.question-editeur').forEach((bloc) => {
-      const i = Number(bloc.dataset.questionIndex);
-      bloc.querySelectorAll('.valeur-choix').forEach((input, ci) => {
-        input.addEventListener('input', () => { questions[i].choix[ci] = input.value; mettreAJourApercuEpreuve(); });
-      });
-      bloc.querySelectorAll('[name="reponseCorrecte"]').forEach((radio) => {
-        radio.addEventListener('change', () => { questions[i].reponseCorrecte = Number(radio.value); mettreAJourApercuEpreuve(); });
-      });
-      bloc.querySelectorAll('[data-retirer-choix]').forEach((btn) => {
-        btn.addEventListener('click', () => {
-          questions[i].choix.splice(Number(btn.dataset.retirerChoix), 1);
-          if (questions[i].reponseCorrecte >= questions[i].choix.length) questions[i].reponseCorrecte = 0;
-          rendreQuestions();
-          mettreAJourApercuEpreuve();
-        });
-      });
-      const btnAjoutChoix = bloc.querySelector(`[data-ajouter-choix-question="${i}"]`);
-      if (btnAjoutChoix) btnAjoutChoix.addEventListener('click', () => { questions[i].choix.push(''); rendreQuestions(); mettreAJourApercuEpreuve(); });
+    carte.querySelectorAll('[data-retirer-choix]').forEach((btn) => {
+      btn.addEventListener('click', () => appliquer(() => {
+        const ci = Number(btn.dataset.retirerChoix);
+        q.choix.splice(ci, 1);
+        if (q.reponseCorrecte === ci) q.reponseCorrecte = 0;
+        else if (q.reponseCorrecte > ci) q.reponseCorrecte--;
+      }));
     });
-  }
-  rendreQuestions();
-  document.getElementById('fTitre').addEventListener('input', mettreAJourApercuEpreuve);
-  document.getElementById('fDuree').addEventListener('input', mettreAJourApercuEpreuve);
-  document.getElementById('fBareme').addEventListener('input', mettreAJourApercuEpreuve);
-  mettreAJourApercuEpreuve();
-
-  document.getElementById('btnAnnuler').addEventListener('click', () => renderMatiereDetail());
-  document.getElementById('btnValider').addEventListener('click', async () => {
-    const titre = document.getElementById('fTitre').value.trim();
-    const dureeMinutes = Number(document.getElementById('fDuree').value);
-    const bareme = Number(document.getElementById('fBareme').value);
-    const erreurEl = document.getElementById('fErreur');
-
-    if (!titre) { erreurEl.textContent = 'Le titre est obligatoire.'; return; }
-    if (questions.length === 0) { erreurEl.textContent = 'Ajoute au moins une question.'; return; }
-    for (const q of questions) {
-      if (!q.enonce.trim()) { erreurEl.textContent = 'Chaque question doit avoir un énoncé.'; return; }
-      if (q.type === 'qcm' && (!q.choix || q.choix.filter((c) => c.trim()).length < 2)) {
-        erreurEl.textContent = 'Chaque QCM doit avoir au moins 2 choix.'; return;
-      }
-    }
-
-    const id = estEdition ? epreuve.id : genererId(`${matiere.id}-ep`);
-    const dirListe = await getOrCreateDir(state.niveauDir, 'epreuves');
-    const dirDetail = await getOrCreateDir(state.niveauDir, 'epreuves-detail');
-
-    const entreeListe = { id, titre, dureeMinutes, nbQuestions: questions.length };
-    if (estEdition) {
-      const idx = liste.findIndex((ep) => ep.id === id);
-      liste[idx] = entreeListe;
-    } else {
-      liste.push(entreeListe);
-    }
-    await writeJson(dirListe, `${matiere.id}.json`, liste);
-    await writeJson(dirDetail, `${id}.json`, { id, titre, dureeMinutes, bareme, questions });
-
-    const matDir = await getOrCreateDir(state.niveauDir, 'matieres');
-    const dirMatiere = await getOrCreateDir(matDir, matiere.id);
-    await bumpVersion(dirMatiere);
-
-    toast(estEdition ? 'Épreuve modifiée.' : 'Épreuve créée.');
-    await renderMatiereDetail();
+    const btnAjoutChoix = carte.querySelector('[data-ajouter-choix]');
+    if (btnAjoutChoix) btnAjoutChoix.addEventListener('click', () => {
+      appliquer(() => { q.choix.push(''); });
+      zoneQuestions.querySelectorAll('.q-carte')[i].querySelector('.choix-ligne:last-of-type .valeur-choix').focus();
+    });
   });
-}
 
-rendreFormulaire();
+  // ▲▼ et glisser-déposer des cartes (l'ordre n'est écrit qu'à l'enregistrement de l'épreuve).
+  activerReordonnancement(zoneQuestions, questions, async () => { marquerModifie(); }, async () => rendreQuestions(), { silencieux: true });
+  // Le déplacement modifie le tableau avant le réaffichage : on recopie les éditeurs juste avant.
+  zoneQuestions.querySelectorAll('[data-monter], [data-descendre]').forEach((b) => b.addEventListener('click', synchroniser, true));
+  zoneQuestions.querySelectorAll('.q-carte').forEach((c) => c.addEventListener('drop', synchroniser, true));
+}
+// Réaffichage sans marquer le formulaire comme modifié (plier / déplier).
+function appliquerSansModif(action) {
+  synchroniser();
+  action();
+  rendreQuestions();
+}
+rendreQuestions();
+
+document.getElementById('btnAjouterQuestion').addEventListener('click', () => {
+  appliquer(() => { questions.push(nouvelleQuestion()); });
+  const carte = zoneQuestions.querySelector('.q-carte:last-of-type');
+  carte.scrollIntoView({ block: 'nearest' });
+  editeurs.get(questions[questions.length - 1].id).enonce.focus();
+});
+document.getElementById('btnToutReplier').addEventListener('click', () => appliquerSansModif(() => questions.forEach((q) => { q.ouvert = false; })));
+document.getElementById('btnToutDeplier').addEventListener('click', () => appliquerSansModif(() => questions.forEach((q) => { q.ouvert = true; })));
+['fTitre', 'fDuree', 'fBareme'].forEach((id) => document.getElementById(id).addEventListener('input', marquerModifie));
+if (!estEdition) document.getElementById('fTitre').focus();
+
+async function enregistrer() {
+  synchroniser();
+  const titre = document.getElementById('fTitre').value.trim();
+  const dureeMinutes = Number(document.getElementById('fDuree').value);
+  const bareme = Number(document.getElementById('fBareme').value);
+  if (!titre) { toast('Le titre est obligatoire.'); document.getElementById('fTitre').focus(); return false; }
+  if (!(dureeMinutes > 0) || !(bareme > 0)) { toast('La durée et le barème doivent être supérieurs à 0.'); return false; }
+  if (questions.length === 0) { toast('Ajoute au moins une question.'); return false; }
+
+  // Une question invalide est dépliée et signalée.
+  const refuser = (i, message) => {
+    appliquerSansModif(() => { questions[i].ouvert = true; });
+    zoneQuestions.querySelectorAll('.q-carte')[i].scrollIntoView({ block: 'nearest' });
+    toast(`Question ${i + 1} : ${message}`);
+    return false;
+  };
+  const sortie = [];
+  for (const [i, q] of questions.entries()) {
+    const enonce = champDepuisHtml(q.enonceHtml);
+    const explication = champDepuisHtml(q.explicationHtml);
+    if (!enonce.texte) return refuser(i, "l'énoncé est vide.");
+    const qcm = q.type === 'qcm' ? choixValides(q.choix, q.reponseCorrecte) : null;
+    if (typeof qcm === 'string') return refuser(i, qcm.charAt(0).toLowerCase() + qcm.slice(1));
+    const question = { id: q.id, type: q.type, enonce: enonce.texte };
+    if (enonce.html) question.enonce_html = enonce.html;
+    if (qcm) { question.choix = qcm.choix; question.reponseCorrecte = qcm.reponseCorrecte; }
+    question.explication = explication.texte;
+    if (explication.html) question.explication_html = explication.html;
+    sortie.push(question);
+  }
+
+  const id = estEdition ? epreuve.id : genererId(`${matiere.id}-ep`);
+  const dirListe = await getOrCreateDir(state.niveauDir, 'epreuves');
+  const dirDetail = await getOrCreateDir(state.niveauDir, 'epreuves-detail');
+
+  const entreeListe = { id, titre, dureeMinutes, nbQuestions: sortie.length };
+  if (estEdition) {
+    const idx = liste.findIndex((ep) => ep.id === id);
+    liste[idx] = entreeListe;
+  } else {
+    liste.push(entreeListe);
+  }
+  await writeJson(dirListe, `${matiere.id}.json`, liste);
+  await writeJson(dirDetail, `${id}.json`, { id, titre, dureeMinutes, bareme, questions: sortie });
+
+  const matDir = await getOrCreateDir(state.niveauDir, 'matieres');
+  const dirMatiere = await getOrCreateDir(matDir, matiere.id);
+  await bumpVersion(dirMatiere);
+
+  toast(estEdition ? 'Épreuve modifiée.' : 'Épreuve créée.');
+  return true;
+}
 }
 
 async function supprimerEpreuve(matiere, id, liste) {

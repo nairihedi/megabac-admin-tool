@@ -19,8 +19,17 @@ données les sert tels quels → la PWA les télécharge si le `version.json` a 
 ## Fonctionnalités
 
 - Gestion complète des niveaux, matières, cours, exercices et épreuves (CRUD).
-- Aperçu en direct des cours, exercices et épreuves pendant la saisie.
-- Insertion d'images dans les contenus (redimensionnées puis intégrées en base64).
+- Cours : éditeur visuel (titres, gras, listes, encadré, sauts de page visibles),
+  sans balises à taper ; collage depuis Word ou le web nettoyé automatiquement.
+- Images affichées comme des images (bouton, glisser-déposer ou copier-coller),
+  converties en WebP et réductibles (« Alléger »), intégrées en base64.
+- Exercices et épreuves : même éditeur en version compacte pour les questions,
+  énoncés et explications. Le texte reste dans `question` / `enonce` /
+  `explication` ; dès qu'il y a une mise en forme ou une image, la variante
+  `question_html` / `enonce_html` / `explication_html` est ajoutée (affichée en
+  priorité par la PWA).
+- Épreuves : une carte repliable par question, réordonnable (▲▼ ou glisser), duplicable.
+- Protection des modifications non enregistrées (témoin, confirmation avant de quitter, Ctrl+S).
 - Création automatique de l'arborescence attendue (niveau, matière, dossiers de détail).
 - `version.json` incrémenté automatiquement à chaque modification, pour que
   l'application sache qu'elle doit retélécharger le contenu.
@@ -41,7 +50,8 @@ outil-admin/                 # à déployer tel quel (hébergement PHP ou statiq
 ├── README-ADMIN.md          # Documentation détaillée (contrat d'API, déploiement, cache)
 ├── admin/                   # L'éditeur (commun aux deux modes)
 │   ├── admin.html
-│   ├── app.js               # Logique (CRUD, aperçus, import d'images)
+│   ├── app.js               # Logique (CRUD, formulaires, aperçus)
+│   ├── editeur.js           # Éditeur visuel (cours, questions, explications), sans dépendance
 │   └── remote.js            # Stockage distant (même interface que la File System Access API)
 └── api-php/                 # Backend PHP (Apache, ou IIS + PHP)
     ├── admin-api.php
@@ -76,5 +86,4 @@ des données, sinon les navigateurs peuvent ne pas voir les nouvelles versions.
 ## Pistes d'évolution
 
 - Pagination des cours longs (tableau `pages` avec rétrocompatibilité sur `contenu`).
-- Optimisation des images (WebP, ré-encodage systématique, affichage du poids).
 - Validation avancée du contenu, annulation (undo), import/export global.
