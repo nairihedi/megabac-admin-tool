@@ -1,6 +1,6 @@
 # Outil d'administration MegaBac — `outil-admin/`
 
-Application web, sans build ni dépendance (page de garde `index.html` ; éditeur dans `admin/` ; backend PHP dans `api-php/`), pour créer/modifier/
+Application web, sans build (seule bibliothèque externe : PDF.js, copiée dans `lib/pdfjs/` pour l'import de pages PDF) (page de garde `index.html` ; éditeur dans `admin/` ; backend PHP dans `api-php/`), pour créer/modifier/
 supprimer tout le contenu (niveaux, matières, cours, exercices, épreuves)
 sans écrire de JSON à la main. Aucune base de données : elle lit et écrit les fichiers JSON du dossier de
 données (structure `exemple-données-serveur/` du projet `megabac-data-server`), de deux façons au choix sur la

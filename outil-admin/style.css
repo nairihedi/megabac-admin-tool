@@ -406,6 +406,77 @@ dialog.modale h3 { margin: 0 0 8px; font-size: 1.05rem; }
 dialog.modale p { margin: 0 0 18px; color: var(--ink-soft); line-height: 1.5; }
 .modale-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 
+/* --- Import d'une page PDF (pdf-import.js) --- */
+dialog.pdf {
+  --ed-accent: #5a3be0;
+  --ed-accent-doux: #efebfe;
+  width: min(1180px, calc(100vw - 32px));
+  height: min(860px, calc(100vh - 32px));
+  max-width: none; max-height: none;
+  padding: 0;
+  border: none;
+  border-radius: 12px;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.3);
+  color: var(--ink);
+  overflow: hidden;
+}
+dialog.pdf[open] { display: flex; flex-direction: column; }
+dialog.pdf::backdrop { background: rgba(31, 41, 55, 0.55); }
+.pdf-tete, .pdf-pied {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 10px;
+  padding: 10px 16px;
+  background: #fafbfc;
+}
+.pdf-tete { border-bottom: 1px solid var(--line); }
+.pdf-pied { border-top: 1px solid var(--line); }
+.pdf-nom { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pdf-nav { display: inline-flex; align-items: center; gap: 6px; }
+.pdf-nav button { padding: 4px 11px; font-size: 1rem; line-height: 1.2; }
+.pdf-num { width: 58px; padding: 5px 6px; border: 1px solid var(--line); border-radius: 6px; font: inherit; text-align: center; }
+.pdf-modes { display: inline-flex; }
+.pdf-modes button { border-radius: 0; margin-left: -1px; }
+.pdf-modes button:first-child { border-radius: 6px 0 0 6px; margin-left: 0; }
+.pdf-modes button:last-child { border-radius: 0 6px 6px 0; }
+.pdf-modes button.actif { background: var(--ed-accent); border-color: var(--ed-accent); color: #fff; position: relative; }
+.pdf-corps { flex: 1; min-height: 0; display: flex; }
+.pdf-page {
+  flex: 0 0 48%; min-width: 0;
+  padding: 12px 16px 16px;
+  overflow: auto; scrollbar-gutter: stable;
+  background: #e9ebf0;
+  border-right: 1px solid var(--line);
+}
+.pdf-aide { margin: 0 0 8px; font-size: 0.78rem; color: var(--ink-soft); min-height: 26px; }
+.pdf-feuille {
+  position: relative; margin: 0 auto;
+  overflow: hidden;
+  background: #fff;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.18);
+  cursor: crosshair;
+  touch-action: none; user-select: none;
+}
+.pdf-feuille canvas { display: block; width: 100%; height: auto; }
+.pdf-zone {
+  position: absolute;
+  border: 2px solid var(--ed-accent);
+  box-shadow: 0 0 0 9999px rgba(31, 41, 55, 0.4); /* assombrit ce qui est hors de la zone */
+  pointer-events: none;
+}
+.pdf-resultat { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.pdf-info { margin: 0; padding: 10px 16px; font-size: 0.8rem; line-height: 1.45; color: var(--ink-soft); border-bottom: 1px solid var(--line); min-height: 52px; }
+.pdf-alt { display: flex; align-items: center; gap: 8px; padding: 8px 16px; font-size: 0.8rem; color: var(--ink-soft); border-bottom: 1px solid var(--line); }
+.pdf-alt input { flex: 1; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; font: inherit; }
+.pdf-apercu.ed-zone { flex: 1; min-height: 0; overflow: auto; padding: 18px 22px 28px; font-size: 15px; }
+.pdf-apercu.ed-zone img { cursor: default; margin-top: 0; }
+.pdf-saut { display: inline-flex; align-items: center; gap: 6px; font-size: 0.82rem; }
+.pdf-etat { font-size: 0.8rem; color: var(--green); font-weight: 600; }
+@media (max-width: 820px) {
+  .pdf-corps { flex-direction: column; overflow: auto; }
+  .pdf-page { flex: none; border-right: none; border-bottom: 1px solid var(--line); overflow: visible; }
+  .pdf-resultat { flex: none; }
+  .pdf-apercu.ed-zone { overflow: visible; }
+}
+
 /* Éditeur compact (questions, explications) */
 .ed-compact { margin-bottom: 0; }
 .ed-compact .ed-barre { position: static; padding: 5px 6px; }

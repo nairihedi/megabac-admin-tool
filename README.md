@@ -23,6 +23,12 @@ données les sert tels quels → la PWA les télécharge si le `version.json` a 
   sans balises à taper ; collage depuis Word ou le web nettoyé automatiquement.
 - Images affichées comme des images (bouton, glisser-déposer ou copier-coller),
   converties en WebP et réductibles (« Alléger »), intégrées en base64.
+- Import d'une page de PDF dans un cours (bouton « PDF ») : en **texte modifiable**
+  (titres, paragraphes, listes, gras, italique reconstitués) ou en **image** (page
+  entière ou zone encadrée à la souris, pour un schéma ou une carte). Une page
+  scannée, sans texte, ne peut être insérée qu'en image. Le PDF est lu dans le
+  navigateur, il n'est envoyé nulle part. Limites : les tableaux sont aplatis en
+  texte, les schémas et images ne sont pas repris en mode texte.
 - Exercices et épreuves : même éditeur en version compacte pour les questions,
   énoncés et explications. Le texte reste dans `question` / `enonce` /
   `explication` ; dès qu'il y a une mise en forme ou une image, la variante
@@ -52,7 +58,9 @@ outil-admin/                 # à déployer tel quel (hébergement PHP ou statiq
 │   ├── admin.html
 │   ├── app.js               # Logique (CRUD, formulaires, aperçus)
 │   ├── editeur.js           # Éditeur visuel (cours, questions, explications), sans dépendance
+│   ├── pdf-import.js        # Import d'une page de PDF (fenêtre, conversion en texte ou en image)
 │   └── remote.js            # Stockage distant (même interface que la File System Access API)
+├── lib/pdfjs/               # PDF.js (Mozilla, Apache 2.0), chargée seulement au clic sur « PDF »
 └── api-php/                 # Backend PHP (Apache, ou IIS + PHP)
     ├── admin-api.php
     ├── admin-config.sample.php

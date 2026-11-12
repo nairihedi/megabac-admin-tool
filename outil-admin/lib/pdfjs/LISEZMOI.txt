@@ -1,0 +1,11 @@
+PDF.js (Mozilla, licence Apache 2.0) — version 6.5.438, paquet npm "pdfjs-dist".
+Sert à l'import de pages PDF dans l'éditeur de cours (admin/pdf-import.js).
+
+Fichiers copiés tels quels depuis le paquet, seule l'extension change (.mjs → .js)
+pour être servis par n'importe quel hébergement sans réglage de type MIME :
+  build/pdf.min.mjs                 → pdf.min.js
+  build/pdf.worker.min.mjs          → pdf.worker.min.js
+  wasm/jbig2_nowasm_fallback.js     → wasm/   (images JBIG2 des PDF scannés)
+  wasm/openjpeg_nowasm_fallback.js  → wasm/   (images JPEG 2000)
+
+Mise à jour : npm install pdfjs-dist, puis recopier ces quatre fichiers.

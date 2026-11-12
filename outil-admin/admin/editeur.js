@@ -9,6 +9,8 @@
 // - Les images sont affichées comme des images (jamais comme du texte base64) :
 //   ajout par bouton, glisser-déposer ou copier-coller ; un clic dessus ouvre une
 //   barre (taille, description, alléger, remplacer, supprimer).
+// - Bouton « PDF » (cours seulement) : importe une page de PDF en texte modifiable
+//   ou en image (voir pdf-import.js).
 // - Les sauts de page (<break /> dans les données) sont des séparateurs visibles
 //   « Page 2 », « Page 3 »… comme l'élève les verra.
 // - Le texte collé (Word, web) est nettoyé : seule la mise en forme autorisée reste.
@@ -165,6 +167,7 @@
     { id: 'blockquote', libelle: '❝ Encadré', titre: 'Encadré « à retenir »' },
     { sep: true },
     { id: 'image', libelle: '🖼 Image', titre: 'Insérer une image (ou glisse-la / colle-la dans le texte)' },
+    { id: 'pdf', libelle: '📄 PDF', titre: "Importer une page d'un PDF, en texte modifiable ou en image" },
     { id: 'saut', libelle: '✂ Saut de page', titre: "Nouvelle page pour l'élève (Ctrl+Entrée)" },
     { sep: true },
     { id: 'undo', libelle: '↶', titre: 'Annuler (Ctrl+Z)' },
@@ -384,6 +387,28 @@
       signalerModification();
     }
 
+    // Insère des blocs HTML (import PDF) après le bloc où se trouve le curseur, sans le couper.
+    // Le curseur est placé à la fin : une insertion suivante se range à la suite.
+    function insererBlocs(html, { sautAvant = false } = {}) {
+      if (modeSource) return;
+      const plage = restaurerPlage();
+      const doc = new DOMParser().parseFromString(`<body>${html}</body>`, 'text/html');
+      const propre = document.createElement('div');
+      nettoyer(doc.body, propre);
+      const blocs = [...propre.children].filter((b) => !blocVide(b));
+      if (!blocs.length) return;
+      const ancre = blocRacine(plage.startContainer) || zone.lastElementChild;
+      const ancreVide = ancre.tagName === 'P' && blocVide(ancre);
+      let dernier = ancre;
+      if (sautAvant) { const saut = creerSaut(); dernier.after(saut); dernier = saut; }
+      for (const bloc of blocs) { dernier.after(bloc); dernier = bloc; }
+      if (ancreVide) ancre.remove(); // on écrivait sur une ligne vide : elle est remplacée
+      garantirStructure();
+      placerCurseur(dernier, true);
+      dernier.scrollIntoView({ block: 'nearest' });
+      signalerModification();
+    }
+
     function basculerSource() {
       if (!modeSource) {
         imagesSource = [];
@@ -414,6 +439,12 @@
         case 'ol': executer('insertOrderedList'); break;
         case 'saut': insererSaut(); break;
         case 'image': imageARemplacer = null; inputFichier.click(); break;
+        case 'pdf':
+          if (!window.ouvrirImportPdf) { notifier("L'import PDF n'est pas disponible (pdf-import.js manquant)."); break; }
+          restaurerPlage(); // mémorise l'endroit où insérer avant que la fenêtre prenne le focus
+          fermerBarreImage();
+          window.ouvrirImportPdf({ inserer: insererBlocs, notifier });
+          break;
         case 'source': basculerSource(); break;
       }
     });
